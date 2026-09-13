@@ -70,6 +70,8 @@ let premiumService: PremiumService | null = null;
 let managedCredential: ManagedConvexCredential | null = null;
 let managedCredentialSource: ConvexManagedCredentialSource | null = null;
 let transcriptionRoute: TranscriptionRouteCoordinator | null = null;
+let byokProvider: OpenAiByokTranscriptionProvider | null = null;
+let byokProviderConfigPath: string | null = null;
 const meetingLifecycle = new MeetingLifecycleCoordinator();
 
 export async function deleteMeetingSafely(
@@ -258,10 +260,13 @@ async function startRecordingRuntimeOnce(deadlineEpochMs: number): Promise<void>
   }
   if (!fixture || process.env.MEETLESS_RUNTIME_PACKAGED === "1") await assertProductionHostProvenance();
   const transcriptionMode = uiTest?.transcriptionMode ?? "native";
+  const byokTranscriptionReady = await linuxByokTranscriptionReady();
   const transcriptionEndpoint = transcriptionMode === "fake"
     ? null
-    : runtimeEndpoint(process.env, "transcription");
-  if (!fixture && (!transcriptionEndpoint || !transcriptionStaging || !path.isAbsolute(transcriptionStaging))) {
+    : byokTranscriptionReady
+      ? linuxByokExemptTranscriptionEndpoint()
+      : runtimeEndpoint(process.env, "transcription");
+  if (!fixture && !byokTranscriptionReady && (!transcriptionEndpoint || !transcriptionStaging || !path.isAbsolute(transcriptionStaging))) {
     throw new Error("Production transcription requires the signed MeetlessHost native capability socket");
   }
   const fixtureExportNow = resolveFixtureExportNow(fixture, fixedStamp);
@@ -295,7 +300,7 @@ async function startRecordingRuntimeOnce(deadlineEpochMs: number): Promise<void>
     failFinalizationOnce: process.env.MEETLESS_FIXTURE_FAIL_FINALIZATION_ONCE === "1",
     authorizeProductionStart: async () => {
       await assertProductionHostProvenance();
-      await assertCapturePermissionsReady();
+      if (!(await linuxByokTranscriptionReady())) await assertCapturePermissionsReady();
     },
     ...(process.env.MEETLESS_RUNTIME_PACKAGED === "1"
       ? { registerCaptureHelper: (childPid: number, registrationToken: string) =>
@@ -376,13 +381,57 @@ function linuxTranscriptionPremiumAccess(): TranscriptionPremiumAccess {
  */
 function linuxByokTranscriptionRoute(): TranscriptionByokRoute | undefined {
   if (process.platform !== "linux") return undefined;
-  const provider = new OpenAiByokTranscriptionProvider({
-    configPath: path.join(os.homedir(), ".local/share/meetless/byok-openai.json"),
-  });
   return {
-    status: () => provider.status(),
-    transcribe: (input) => transcribeByokRecording(provider, input),
+    status: () => getLinuxByokProvider().status(),
+    transcribe: (input) => transcribeByokRecording(getLinuxByokProvider(), input),
   };
+}
+
+/**
+ * BYOK key file location (linux-port rider): the runtime root fixed by the
+ * daemon launcher (MEETLESS_RUNTIME_ROOT) wins; a direct unpackaged run falls
+ * back to the platform support root ~/.local/share/meetless.
+ */
+function linuxByokConfigPath(): string {
+  const runtimeRoot = process.env.MEETLESS_RUNTIME_ROOT?.trim();
+  if (runtimeRoot && path.isAbsolute(runtimeRoot)) {
+    return path.join(path.resolve(runtimeRoot), "byok-openai.json");
+  }
+  return path.join(os.homedir(), ".local/share/meetless/byok-openai.json");
+}
+
+function getLinuxByokProvider(): OpenAiByokTranscriptionProvider {
+  const configPath = linuxByokConfigPath();
+  if (!byokProvider || byokProviderConfigPath !== configPath) {
+    byokProviderConfigPath = configPath;
+    byokProvider = new OpenAiByokTranscriptionProvider({ configPath });
+  }
+  return byokProvider;
+}
+
+/**
+ * Linux-port Issue 1c: when the transcription route is BYOK (a configured key
+ * exists), recording bootstrap and production start no longer require the
+ * signed native capability socket — the native-socket requirements stay
+ * mandatory for the managed route, which remains unavailable on linux exactly
+ * like the premium no-op. Darwin is byte-identical (never linux).
+ */
+async function linuxByokTranscriptionReady(): Promise<boolean> {
+  if (process.platform !== "linux" || process.env.MEETLESS_RUNTIME_PACKAGED === "1") return false;
+  try {
+    return (await getLinuxByokProvider().status()) === "configured";
+  } catch {
+    return false;
+  }
+}
+
+/** Endpoint resolution that may legitimately be absent under the BYOK exemption. */
+function linuxByokExemptTranscriptionEndpoint() {
+  try {
+    return runtimeEndpoint(process.env, "transcription");
+  } catch {
+    return null;
+  }
 }
 
 async function transcribeByokRecording(
