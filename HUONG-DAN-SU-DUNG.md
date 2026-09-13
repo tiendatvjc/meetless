@@ -110,7 +110,7 @@ journalctl --user -u meetless-daemon -n 50 # xem 50 dòng log gần nhất (F10 
 ```bash
 cd /home/dat/Applications/meetless && npm run runtime:web
 ```
-→ mở trình duyệt tại **http://localhost:8082**. Để dừng: nhấn `Ctrl+C` trong Terminal.
+→ mở trình duyệt tại **http://127.0.0.1:8082**. Để dừng: nhấn `Ctrl+C` trong Terminal.
 
 ### Ghi âm một cuộc họp
 
@@ -186,32 +186,21 @@ tạo và **hiển thị ngay trong giao diện desktop** ở màn hình "Connec
 
 ### Cách dùng ngay trên CÙNG một máy (khuyên dùng, đã cấu hình sẵn)
 
-Daemon đã lắng nghe `127.0.0.1:8081`, cho phép trang web `127.0.0.1:8082` kết nối,
-và **đã đặt mật khẩu host** (bắt buộc — form Direct không cho bấm "Pair securely"
-nếu ô mật khẩu trống):
+Daemon đã lắng nghe `127.0.0.1:8081` và cho phép trang web `127.0.0.1:8082` kết
+nối (dùng đúng địa chỉ `127.0.0.1:8082` — KHÔNG dùng `localhost:8082`, daemon từ
+chối origin `localhost`). Form Direct bắt buộc ô mật khẩu không được trống:
 
-1. Mở trình duyệt tại **http://localhost:8082** (hoặc nhìn cửa sổ desktop Meetless).
+1. Mở trình duyệt tại **http://127.0.0.1:8082** (hoặc nhìn cửa sổ desktop Meetless).
 2. Ở màn hình "Connect a companion" chọn kiểu **Direct connection** và nhập:
    - **Endpoint:** `127.0.0.1:8081`
-   - **Host password:** `meetless2026` (mật khẩu mặc định đã cài — đổi ngay như dưới)
+   - **Host password:** `meetless2026` (giá trị mặc định — xem lưu ý dưới)
 3. Bấm **Pair securely**. Từ đó companion nhớ thiết bị này, không phải làm lại.
 
-**Đổi mật khẩu host:** mật khẩu được lưu dạng hash bcrypt trong
-`~/.local/share/meetless/paseo-home/config.json` (mục `daemon.auth.password`).
-Cách đổi:
-
-```bash
-cd /home/dat/Applications/meetless
-HASH=$(node -e "console.log(require('bcryptjs').hashSync('MẬT-KHÓU-MỚI', 12))")
-python3 - "$HASH" <<'EOF'
-import json, sys
-p = "/home/dat/.local/share/meetless/paseo-home/config.json"
-cfg = json.load(open(p)); cfg["daemon"]["auth"] = {"password": sys.argv[1]}
-json.dump(cfg, open(p, "w"), indent=2)
-EOF
-systemctl --user restart meetless-daemon
-```
-(rồi dùng mật khẩu mới ở bước 2.)
+**Lưu ý về mật khẩu host:** daemon **ghi đè lại file config mỗi lần khởi động**
+(normalize theo template của runtime) nên đặt mật khẩu hay thêm origin qua tay
+file config không bền — hiện daemon không ép xác thực mật khẩu trên kết nối trực
+tiếp nội bộ; UI vẫn cần ô không trống, dùng `meetless2026`. Ép mật khẩu thật và
+mở origin `localhost` cần sửa code runtime — đã ghi trong followups.
 
 ### Kết nối từ ĐIỆN THOẠI / máy khác — 2 cách
 

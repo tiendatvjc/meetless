@@ -34,3 +34,9 @@ Branch `linux-port` (fork tiendatvjc/meetless), completed 2026-09-13. Spec: ../s
 ## Sửa sai sót sau bàn giao (2026-09-13)
 
 - Tên gói apt trong hướng dẫn bị sai: không tồn tại `pipewire-audio-utils` trên Ubuntu. `parec`/`pactl` nằm trong `pulseaudio-utils`; cần thêm `pipewire-pulse` (lớp Pulse-over-PipeWire) nếu máy chưa có. Đã sửa build-native.mjs, install-linux-host.mjs, linux-development.md, platforms.md.
+
+## Vấn đề phát hiện khi dùng thật (2026-09-13 tối)
+
+- Runtime daemon **ghi đè `paseo-home/config.json` mỗi lần khởi động** theo template riêng: bỏ `daemon.auth.password` và các origin CORS thêm tay (chỉ giữ origin renderer `127.0.0.1:8082`). Hệ quả: đặt mật khẩu/localhost-origin qua config file không bền. Cần sửa code (đưa auth + extra origins vào template của runtime, hoặc qua env) trước khi quảng cáo các tính năng đó.
+- `runtime:desktop` (khi thất bại lẫn khi chạy) cũng ghi config này — đã ghi ở mục trên.
+- Companion phải mở bằng `http://127.0.0.1:8082` (localhost bị daemon từ chối origin cho tới khi follow-up trên land).
