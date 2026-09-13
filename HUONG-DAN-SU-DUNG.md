@@ -217,6 +217,13 @@ trên màn hình desktop (hoặc copy link dán vào companion). Đặc điểm:
 dùng được qua internet (không cần cùng wifi); dữ liệu meeting vẫn chỉ nằm trên máy
 desktop, relay chỉ chuyển tiếp đã mã hóa.
 
+> Link/QR có dạng `https://app.paseo.sh/#offer=...` — do daemon sinh ra (chứa ID +
+> khóa công khai của daemon + địa chỉ relay). Trong sản phẩm gốc, nó hiển thị kèm mã
+> QR ngay trên màn hình "Connect a companion" của phiên desktop **đã kết nối**, để
+> bạn đưa vào THIẾT BỊ KHÁC. Lưu ý trên bản port: link này mở web app của Paseo
+> (`app.paseo.sh`) chứ chưa trỏ về companion Meetless — luồng relay **chưa dùng
+> được** cho tới khi cấu hình lại `appBaseUrl`; dùng **Direct LAN** cho cùng máy.
+
 **Cách 2 — Direct LAN (cùng wifi):** nhập endpoint + mật khẩu host. Nhanh, không
 đi ra internet, nhưng tín hiệu trên wifi nội bộ **không mã hóa** — chỉ dùng ở mạng
 nhà. Để dùng được cần mở daemon ra ngoài và đặt mật khẩu (mục dưới).
