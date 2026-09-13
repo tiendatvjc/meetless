@@ -47,7 +47,7 @@
     "host:linux:apply": "node scripts/install-linux-host.mjs --install",
     "host:linux:uninstall": "node scripts/install-linux-host.mjs --uninstall",
     "runtime:linux:status": "systemctl --user status meetless-daemon --no-pager || true",
-    "proof:linux": "npm run build:paseo:types && npm run build:meetless && node scripts/prove-linux-port.mjs",
+    "proof:linux": "npm run build:paseo && npm run build:meetless && node scripts/prove-linux-port.mjs",
     "package:macos:arm64": "npm run build && node scripts/package-macos.mjs --signing-mode=local-ad-hoc --proof-root=$(mktemp -d /private/tmp/meetless-package-proof.XXXXXX)",
     "package:macos:dmg": "node scripts/package-macos-dmg.mjs --build-package --proof-root=$(mktemp -d /private/tmp/meetless-dmg-proof.XXXXXX)",
     "package:macos:arm64:release": "npm run build && node scripts/package-macos.mjs --signing-mode=release",

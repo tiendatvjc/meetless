@@ -21,8 +21,12 @@ sudo apt install ffmpeg pipewire-audio-utils
 ## Build
 
 ```bash
-npm run build:paseo:types && npm run build:meetless
+npm run build:paseo && npm run build:meetless
 ```
+
+Chỉ chạy `build:paseo:types` là không đủ: daemon probe cần dist của
+`@getpaseo/server` (`supervisor-entrypoint`) cùng highlight/cli/desktop
+build, tức toàn bộ `build:paseo`.
 
 ## Cài daemon như systemd user service
 
@@ -81,7 +85,11 @@ Mở http://localhost:8082 (daemon chạy tại 127.0.0.1:8081).
 
 ## Verified on
 
-(chưa có)
+- 2026-09-13, Ubuntu 26.04.1, Node v24.16.0: `npm run proof:linux` (sau khi đổi
+  sang `build:paseo` đầy đủ) — daemon probe stage 0 nghe TCP tại
+  `127.0.0.1:18081` trong 4.1s (module error supervisor-entrypoint đã hết);
+  cả 5 stage `ok:true`, exit 0. Manifest:
+  `.artifacts/linux-proof/manifest-20260913T121515.json`.
 
 ## Khác biệt so với macOS
 
