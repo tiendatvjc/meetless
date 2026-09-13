@@ -1151,11 +1151,13 @@ function RecordingSetup({ controller, onCancel }: { controller: RecordingSetupCo
     const normalized = title.trim();
     if (!normalized || controller.pending) return;
     try {
+      console.info("[recording-submit] calling onStart", normalized);
       await controller.onStart(normalized);
       setTitle("");
       onCancel();
-    } catch {
-      // The recording provider owns the user-facing failure state.
+    } catch (error) {
+      // Temporary linux-port diagnostics: surface the swallowed failure.
+      console.error("[recording-submit] failed:", error);
     }
   };
   return (
@@ -1217,7 +1219,10 @@ function RecordingSetup({ controller, onCancel }: { controller: RecordingSetupCo
           <FocusPressable accessibilityLabel="Cancel recording setup" accessibilityRole="button" disabled={controller.pending} onPress={onCancel} style={styles.ghostButton} testID="recording-setup-cancel">
             <Text style={styles.ghostButtonText}>Cancel</Text>
           </FocusPressable>
-          <FocusPressable accessibilityLabel="Start recording" accessibilityRole="button" accessibilityState={{ disabled: controller.pending || controller.permissions?.checking || !title.trim() }} disabled={controller.pending || controller.permissions?.checking || !title.trim()} onPress={() => void submit()} style={styles.primaryButton} testID="recording-start">
+          {/* linux-port: remount when the disabled state flips — RN-web leaves
+              press handlers stale on buttons that mounted disabled (Start was
+              disabled until the title was typed, then never fired). */}
+          <FocusPressable key={controller.pending || controller.permissions?.checking || !title.trim() ? "disabled" : "enabled"} accessibilityLabel="Start recording" accessibilityRole="button" accessibilityState={{ disabled: controller.pending || controller.permissions?.checking || !title.trim() }} disabled={controller.pending || controller.permissions?.checking || !title.trim()} onPress={() => void submit()} style={styles.primaryButton} testID="recording-start">
             <Text style={styles.buttonText}>{controller.pending ? "Starting…" : "Start recording"}</Text>
           </FocusPressable>
         </View>
