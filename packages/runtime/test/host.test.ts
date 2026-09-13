@@ -261,7 +261,10 @@ describe("Meetless-owned production host invariant", () => {
     })).rejects.toThrow(/live host executable hash\/CDHash\/designated requirement differs.*Authority/s);
   });
 
-  test("production CLI fails closed when launched directly outside MeetlessHost", async () => {
+  // The fail-closed-on-direct-launch contract is darwin-authored: dev direct launches must route through MeetlessHost.
+  // On linux the port replaces MeetlessHost with systemd/dev-ppid ownership — see
+  // docs/superpowers/specs/2026-09-13-ubuntu-port-design.md §4/§5.3 and linux-desktop-attestation.test.ts.
+  test.skipIf(process.platform !== "darwin")("production CLI fails closed when launched directly outside MeetlessHost", async () => {
     await expect(execFileAsync(process.execPath, [path.resolve("packages/runtime/dist/cli.js"), "desktop"], {
       cwd: process.cwd(),
       env: {

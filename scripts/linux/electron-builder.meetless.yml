@@ -29,7 +29,7 @@ linux:
     - AppImage
     - deb
   category: Utility
-  maintainer: Meetless <dev@meetless.app>
+  maintainer: tiendatvjc <tiendatvjc@users.noreply.github.com>
   icon: scripts/linux/icon.png
 appImage:
   artifactName: meetless-${version}-${arch}.AppImage
