@@ -912,9 +912,19 @@ const defaultLiveProcessInspection: LiveProcessInspection = {
   argumentVector: async (pid) => inspectNativeArgumentVector(pid),
 };
 
+export function parseProcCmdline(buffer: Buffer): string[] {
+  return buffer.toString("utf8").split("\0").filter((entry) => entry.length > 0);
+}
+
+async function readLinuxProcessArgv(pid: number): Promise<string[]> {
+  const { readFile } = await import("node:fs/promises");
+  return parseProcCmdline(await readFile(`/proc/${pid}/cmdline`));
+}
+
 export async function inspectNativeArgumentVector(pid: number): Promise<string[]> {
+  if (process.platform === "linux") return readLinuxProcessArgv(pid);
   if (process.platform !== "darwin") {
-    throw new Error(`native argv inspection requires macOS, received ${process.platform}`);
+    throw new Error(`native argv inspection requires macOS or Linux, received ${process.platform}`);
   }
   const inspector = path.join(REPOSITORY_ROOT, "packages/runtime/dist/meetless-process-argv");
   const inspected = spawnSync(inspector, [String(pid)], { encoding: "utf8" });
