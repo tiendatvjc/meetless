@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { access, lstat, readFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import type { TranscriptState } from "@meetless/meeting-domain";
 import { MeetingStore } from "@meetless/meeting-store";
 import type { MeetingDeleteStoreResult } from "@meetless/meeting-store";
 import { RecordingService } from "./recording-service.js";
@@ -52,7 +54,8 @@ import {
   FileManagedConvexUploadJournal,
   type ManagedConvexCredential,
 } from "./managed-upload.js";
-import { TranscriptionRouteCoordinator } from "./transcription-route.js";
+import { TranscriptionRouteCoordinator, type TranscriptionByokRoute } from "./transcription-route.js";
+import { OpenAiByokTranscriptionProvider } from "./openai-byok-provider.js";
 
 let store: MeetingStore | null = null;
 let recordingService: RecordingService | null = null;
@@ -349,8 +352,50 @@ export function getTranscriptionRoute(): TranscriptionRouteCoordinator {
         onDurableStart: input.onDurableStart,
       }),
     },
+    linuxByokTranscriptionRoute(),
   );
   return transcriptionRoute;
+}
+
+/**
+ * Linux has no signed MeetlessHost native capability socket, so a user-supplied
+ * OpenAI key is the only in-process transcription route there
+ * (docs/product/monetization.md). macOS keeps the managed-only wiring until
+ * BYOK ships on that platform.
+ */
+function linuxByokTranscriptionRoute(): TranscriptionByokRoute | undefined {
+  if (process.platform !== "linux") return undefined;
+  const provider = new OpenAiByokTranscriptionProvider({
+    configPath: path.join(os.homedir(), ".local/share/meetless/byok-openai.json"),
+  });
+  return {
+    status: () => provider.status(),
+    transcribe: (input) => transcribeByokRecording(provider, input),
+  };
+}
+
+async function transcribeByokRecording(
+  provider: OpenAiByokTranscriptionProvider,
+  input: { recordingId: string; onDurableStart(transcript: TranscriptState): void },
+): Promise<{ transcript: TranscriptState }> {
+  const storeRoot = requiredAbsolute("MEETLESS_STORE_ROOT");
+  const staging = process.env.MEETLESS_TRANSCRIPTION_STAGING?.trim();
+  const service = new TranscriptionService(getMeetingStore(), provider, {
+    inspector: new FfmpegAudioInspector(
+      requiredAbsolute("MEETLESS_FFMPEG"),
+      requiredAbsolute("MEETLESS_FFPROBE"),
+      staging && path.isAbsolute(staging) ? staging : path.join(storeRoot, "transcription-ranges"),
+    ),
+    sourceSnapshots: new PrivateAudioSnapshotStore(path.join(storeRoot, "transcription-source-snapshots"), "transcription-source"),
+    onStateChange: (transcript) => {
+      // The coordinator's start contract resolves on the first durable
+      // pending/transcribing state, mirroring the managed dispatch.
+      if (transcript.status === "pending" || transcript.status === "transcribing") input.onDurableStart(transcript);
+    },
+  }, meetingLifecycle);
+  const transcript = await service.transcribeSavedRecording(input.recordingId);
+  if (transcript.status === "failed") throw new Error(transcript.failureReason ?? "BYOK transcription failed");
+  return { transcript };
 }
 
 export function getCitationPlaybackService(): CitationPlaybackService {

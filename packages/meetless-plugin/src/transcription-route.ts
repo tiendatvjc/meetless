@@ -1,5 +1,6 @@
 import type { PremiumAccessWire, TranscriptionFailureCategoryWire, TranscriptionRouteOutcomeWire, TranscriptionStatusWire } from "@meetless/meeting-contracts";
 import { validateManagedQuotaFailure, canRetryTranscript, type Meeting, type RecordingSession, type TranscriptState } from "@meetless/meeting-domain";
+import type { TranscriptionProviderStatus } from "./transcription-provider.js";
 
 export const MANAGED_PREMIUM_REQUIRED_MESSAGE = "Premium is required. Purchase or restore Premium, then select Transcribe again.";
 export const MANAGED_PREMIUM_RECOVERY_MESSAGE = "Premium access could not be verified. Restore purchases or check Premium access, then select Transcribe again.";
@@ -13,6 +14,12 @@ export interface TranscriptionRouteStore {
   grantTranscriptionConsent(): Promise<{ status: "granted"; grantedAt: string }>;
 }
 export interface TranscriptionPremiumAccess { status(): Promise<Pick<PremiumAccessWire, "status">>; }
+export interface TranscriptionByokRoute {
+  /** BYOK selection probe; it must never read or mutate Premium state. */
+  status(): Promise<TranscriptionProviderStatus>;
+  /** Local dispatch replacing the managed upload flow when BYOK is configured. */
+  transcribe(input: { recordingId: string; onDurableStart(transcript: TranscriptState): void }): Promise<{ transcript: TranscriptState }>;
+}
 export interface ManagedTranscriptionDispatch {
   transcribe(input: { recordingId: string; onDurableStart(transcript: TranscriptState): void }): Promise<{ transcript: TranscriptState }>;
   /** Recover/settle/publish/acknowledge only an existing job; never upload or invoke a provider. */
@@ -20,7 +27,7 @@ export interface ManagedTranscriptionDispatch {
 }
 export interface TranscriptionRouteResult extends TranscriptionStatusWire {
   readonly consent: { status: "granted"; grantedAt: string };
-  readonly route: "managed";
+  readonly route: "managed" | "byok";
   readonly transcript: TranscriptState | null;
 }
 
@@ -50,7 +57,7 @@ export class TranscriptionRouteCoordinator {
   private readonly reads = new Map<string, Promise<TranscriptState | null>>();
   private readonly acknowledgedReady = new Set<string>();
 
-  constructor(private readonly store: TranscriptionRouteStore, private readonly premium: TranscriptionPremiumAccess, private readonly managed: ManagedTranscriptionDispatch) {}
+  constructor(private readonly store: TranscriptionRouteStore, private readonly premium: TranscriptionPremiumAccess, private readonly managed: ManagedTranscriptionDispatch, private readonly byok?: TranscriptionByokRoute) {}
 
   async status(meetingId: string): Promise<{ recording: { recordingId: string; status: RecordingSession["status"] } | null; transcript: TranscriptState | null; transcription: TranscriptionStatusWire }> {
     const recording = (await this.store.listRecordings()).find((entry) => entry.meetingId === meetingId);
@@ -106,7 +113,8 @@ export class TranscriptionRouteCoordinator {
     // Reject before recording consent or touching managed auth when audio is not saved.
     if (!recording) throw new Error(MANAGED_TRANSCRIPTION_NO_SAVED_RECORDING_MESSAGE);
     const consent = await this.store.grantTranscriptionConsent();
-    const result = (state: TranscriptionStatusWire, transcript: TranscriptState | null): TranscriptionRouteResult => ({ consent, route: "managed", ...state, transcript });
+    let route: "managed" | "byok" = "managed";
+    const result = (state: TranscriptionStatusWire, transcript: TranscriptState | null): TranscriptionRouteResult => ({ consent, route, ...state, transcript });
     let transcript = await this.store.getTranscriptForMeeting(meetingId);
     if (transcript && this.managed.resumeExisting && !this.running.has(recording.id)) {
       try { transcript = await this.recoverExisting(recording.id) ?? transcript; }
@@ -120,14 +128,21 @@ export class TranscriptionRouteCoordinator {
     if (transcript?.status === "ready") return result(this.state("completed"), transcript);
     if (this.running.has(recording.id)) return result(this.state("already_running"), transcript);
     if (transcript?.status === "failed" && !canRetryTranscript(transcript)) return result(this.state("failed", false, "retry_exhausted", "No further transcription retries are available for this recording. The saved audio remains local."), transcript);
-    let access: PremiumAccessWire["status"] = "unavailable";
-    try { access = (await this.premium.status()).status; } catch { /* fail closed */ }
-    if (access !== "active") return result(this.state(access === "inactive" ? "purchase_required" : "recovery_required", false, "access", access === "inactive" ? MANAGED_PREMIUM_REQUIRED_MESSAGE : MANAGED_PREMIUM_RECOVERY_MESSAGE), transcript);
+    // BYOK selection (docs/product/monetization.md): a configured user key
+    // routes transcription locally before any Premium read and never touches
+    // Premium state; a missing BYOK key keeps the managed flow unchanged.
+    const byok = this.byok !== undefined && (await this.byok.status()) === "configured" ? this.byok : null;
+    route = byok ? "byok" : "managed";
+    if (!byok) {
+      let access: PremiumAccessWire["status"] = "unavailable";
+      try { access = (await this.premium.status()).status; } catch { /* fail closed */ }
+      if (access !== "active") return result(this.state(access === "inactive" ? "purchase_required" : "recovery_required", false, "access", access === "inactive" ? MANAGED_PREMIUM_REQUIRED_MESSAGE : MANAGED_PREMIUM_RECOVERY_MESSAGE), transcript);
+    }
     this.failures.delete(recording.id);
     let signal!: (transcript: TranscriptState) => void;
     const durable = new Promise<TranscriptState>((resolve) => { signal = resolve; });
     let failure: unknown = null;
-    const work = Promise.resolve().then(() => this.managed.transcribe({ recordingId: recording.id, onDurableStart: signal }))
+    const work = Promise.resolve().then(() => (byok ?? this.managed).transcribe({ recordingId: recording.id, onDurableStart: signal }))
       .then((completed) => { transcript = completed.transcript; }, (error: unknown) => {
         failure = error;
         const detail = transcriptionFailure(error);

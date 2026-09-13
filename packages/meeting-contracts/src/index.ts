@@ -100,7 +100,7 @@ export const TranscriptionProviderStatusWireSchema = z.object({
 
 export type TranscriptionProviderStatusWire = z.infer<typeof TranscriptionProviderStatusWireSchema>;
 
-export const TranscriptionRouteWireSchema = z.literal("managed");
+export const TranscriptionRouteWireSchema = z.enum(["managed", "byok"]);
 export type TranscriptionRouteWire = z.infer<typeof TranscriptionRouteWireSchema>;
 
 export const TranscriptionRouteOutcomeWireSchema = z.enum([
