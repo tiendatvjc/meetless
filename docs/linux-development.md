@@ -122,6 +122,23 @@ Các bước smoke:
 
 ## Verified on
 
+- 2026-09-13, final fix wave (Issue 4, đóng gói lại): `npm run package:linux`
+  tạo layout staging hoàn chỉnh (mirror REPOSITORY-ROOT: packages/runtime +
+  packages/meetless-plugin + vendor desktop main/supervisor/daemon-worker bundle
+  + node_modules/@getpaseo + node_modules/which,isexe + dist/daemon runner);
+  AppImage `meetless-0.1.0-x86_64.AppImage` (122.4 MiB, sha256
+  814ea2dc61704d11c1d5322370507f3c9220882d078a91639690d8ccca10855b) extract
+  OK; deb Maintainer đã là fork identity `tiendatvjc
+  <tiendatvjc@users.noreply.github.com>`. Launch (squashfs-root/Meetless
+  --no-sandbox, env MEETLESS_RUNTIME_ROOT/PASEO_ELECTRON_USER_DATA_DIR tmp,
+  DISPLAY :0): main process boot sạch — KHÔNG còn "JavaScript error occurred in
+  the main process"/"Cannot find module" nào; userData isolate + login-shell-env
+  chạy; cửa sổ được tạo; lỗi còn lại là nội dung renderer `paseo://app/`
+  (ERR_UNEXPECTED) vì paseo web app export không build được trong workspace này
+  (app workspace vendored không có node_modules; expo-two-way-audio typecheck
+  fail dưới hoisting của meetless) — residual đã ghi trong package-linux.mjs.
+  Log: /tmp/appimage-launch12.log.
+
 - 2026-09-13, final fix wave: `npm run host:linux:apply` (sau fix Issue 3) —
   service `meetless-daemon.service` active, ExecStart chạy
   `packages/runtime/dist/cli.js daemon` của repo, Paseo Supervisor + Daemon

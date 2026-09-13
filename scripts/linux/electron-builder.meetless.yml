@@ -5,11 +5,21 @@
 #     --config <repo>/scripts/linux/electron-builder.meetless.yml --linux AppImage deb
 #
 # All relative paths resolve against the staging project dir
-# (<repo>/.artifacts/linux-package/app), which contains:
-#   runtime/   esbuild single-file bundle of packages/runtime/dist/cli.js
-#   plugin/    packages/meetless-plugin/dist + bundled linux capture helper entry
-#   renderer/  packages/meetless-app/dist (expo static web export)
+# (<repo>/.artifacts/linux-package/app), which mirrors the REPOSITORY-ROOT
+# layout the bundled runtime resolves (final-review Issue 4):
+#   packages/runtime/dist/       esbuild bundles: cli.js + ui-test-envelope.js
+#   packages/meetless-plugin/    full compiled plugin dist (repo-relative plugin path)
+#   vendor/paseo/packages/desktop/dist/main.js    bundled desktop main (bootstrap import)
+#   vendor/paseo/packages/server/dist/            bundled supervisor-entrypoint + daemon-worker
+#   node_modules/@getpaseo/server/dist/           same bundles at the vendored packaged-daemon path
+#   node_modules/which, node_modules/isexe         runtime require("which") closure (executable-resolution)
+#   dist/daemon/node-entrypoint-runner.js         electron-as-node relaunch runner
+#   renderer/                    packages/meetless-app/dist (expo static web export)
+# extraResources: paseo app-dist (paseo://app/ UI), skills, editor-target-icons
 #   scripts/electron-bootstrap.mjs and scripts/linux/icon.png
+#
+# The supervisor/worker/node-entrypoint-runner are spawned as node child
+# processes by absolute path, so they must live OUTSIDE the asar archive.
 appId: com.meetless.app
 productName: Meetless
 executableName: Meetless
@@ -17,13 +27,29 @@ directories:
   # <staging>/../../.. = repo root
   output: ../../../release/linux
 files:
-  - runtime/**/*
-  - plugin/**/*
+  - packages/**/*
+  - vendor/**/*
+  - node_modules/@getpaseo/**/*
+  - node_modules/which/**/*
+  - node_modules/isexe/**/*
+  - dist/**/*
   - renderer/**/*
   - scripts/electron-bootstrap.mjs
 asarUnpack:
-  - runtime/**
-extraResources: []
+  - packages/runtime/**
+  - vendor/**
+  - node_modules/@getpaseo/**
+  - dist/**
+extraResources:
+  # The vendored desktop main loads paseo://app/ from <resources>/app-dist and
+  # resolves skills/editor icons from resources (mirroring the paseo builder).
+  # The from: paths are staged inside the project dir by package-linux.mjs.
+  - from: vendor/paseo/packages/app/dist
+    to: app-dist
+  - from: vendor/paseo/skills
+    to: skills
+  - from: vendor/paseo/packages/desktop/assets/editor-targets
+    to: editor-target-icons
 linux:
   target:
     - AppImage
