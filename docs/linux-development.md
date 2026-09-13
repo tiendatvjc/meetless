@@ -94,8 +94,31 @@ Mở http://localhost:8082 (daemon chạy tại 127.0.0.1:8081).
   npm run runtime:desktop`): fail-closed ngay tại host attestation trước khi spawn
   electron — "Production Meetless host attestation failed closed: cannot attest the
   installed host: ENOENT ... realpath '/Applications/Meetless.app'", exit 1 sau ~2s.
-  Hợp đồng spawn dev đã được khoá bởi `packages/runtime/test/linux-desktop-spawn.test.ts`;
-  nhánh dev host-attestation cho linux là việc của task sau.
+  (Đã sửa ở desktop side bởi commit `b89aefa` — linux dev-mode bypass cho
+  `assertDesktopLaunchedByHost`; xem bullet proof desktop mới hơn bên dưới.)
+- 2026-09-13, packaging (Task 11): `npm run package:linux` tạo ra
+  `release/linux/meetless-0.1.0-x86_64.AppImage` (117.1 MiB, sha256
+  f6166ba06356e6e50eb360cd92b0ec5dc21997fd97df7def413e6cf9de8d267c) và
+  `release/linux/meetless_0.1.0_amd64.deb` (91.8 MiB, sha256
+  536cf91542c5d7fd6da896d35490341c3f6088cc61c997e6126261fc5e24163c); extract +
+  metadata đã kiểm. Lưu ý: hai artifact này còn mang maintainer/homepage
+  placeholder cũ `Meetless <dev@meetless.app>` / `https://meetless.app` —
+  bản sửa fork identity (`tiendatvjc <tiendatvjc@users.noreply.github.com>` /
+  `https://github.com/tiendatvjc/meetless`) nằm ở source
+  (`scripts/package-linux.mjs`, `scripts/linux/electron-builder.meetless.yml`),
+  cần chạy lại `package:linux` để artifact mới nhận metadata mới.
+- 2026-09-13, proof đầy đủ 6 stage (Task 12, có display `:0`): `npm run proof:linux`
+  — exit 0, gate `record/finalize/transcribe` đều `ok:true`; stage desktop
+  (evidence-only) `ok:true` theo tiêu chí liveness: process sống 30.1s đến khi
+  `timeout 30` TERM (exit 124), daemon con nghe tại `127.0.0.1:18085` và các port
+  đóng sạch sau exit. Renderer origin `http://127.0.0.1:18086` KHÔNG trả HTTP 200:
+  desktop dev chặn tại `waitForRecordingRuntime` vì plugin trong daemon từ chối
+  recording start ("no complete MeetlessHost attestation" —
+  `packages/meetless-plugin/src/production-host.ts:79` cần env
+  `MEETLESS_HOST_PID/BUNDLE_PATH/IDENTITY_PATH` mà trên macOS do
+  `npm run runtime:host` cung cấp; nhánh linux tương đương là task sau). Expo
+  renderer và electron do đó chưa được spawn trong proof. Manifest:
+  `.artifacts/linux-proof/manifest-20260913T125851.json`.
 
 ## Khác biệt so với macOS
 

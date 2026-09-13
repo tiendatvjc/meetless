@@ -8,6 +8,10 @@
  *   server. Nothing is asserted from hopes.
  * - Stage 0 (daemon probe) and stage 4 (MCP) are recorded evidence, not gates:
  *   a truthful failure or skip does not fail the proof; a faked pass would.
+ * - The desktop stage (Task 12) is evidence-only too: it launches the DEV
+ *   desktop (`npm run runtime:desktop`) under `timeout` with a tmp runtime
+ *   root and reports process lifetime + renderer-origin HTTP truthfully; with
+ *   no display (DISPLAY/WAYLAND_DISPLAY/xvfb-run) it records a skip reason.
  * - All session/store/key state lives in mkdtemp tmpdirs and is removed.
  * - No secrets: the OpenAI fetch is a stub; the key file holds a fixture key.
  *
@@ -42,6 +46,10 @@ const TRANSCRIPT_TEXT = "xin chào bằng chứng linux port";
 const BYOK_FIXTURE_KEY = "sk-linux-port-proof-fixture";
 const DAEMON_LISTEN = "127.0.0.1:18081";
 const DAEMON_PORT = 18081;
+const DESKTOP_LISTEN = "127.0.0.1:18085";
+const DESKTOP_DAEMON_PORT = 18085;
+const DESKTOP_RENDERER_ORIGIN = "http://127.0.0.1:18086";
+const DESKTOP_RENDERER_PORT = 18086;
 const RECORD_MS = 6_000;
 
 /** Shared plumbing between stages (record -> finalize -> transcribe). */
@@ -69,12 +77,16 @@ async function main() {
     ? await runStage("transcribe", stageTranscribeByok)
     : skipped("transcribe", `record stage failed: ${record.error}`);
   const mcp = await runStage("mcp", stageTranscriptMcp);
+  const desktopDisplay = resolveDesktopDisplay();
+  const desktop = desktopDisplay.available
+    ? await runStage("desktop", () => stageDesktopDev(desktopDisplay))
+    : skipped("desktop", `no DISPLAY/WAYLAND_DISPLAY and xvfb-run unavailable: ${desktopDisplay.reason}`);
 
   const gatePassed = [record, finalize, transcribe].every((entry) => entry.ok);
   const summary = {
     ok: gatePassed,
     gate: ["record", "finalize", "transcribe"],
-    evidenceOnly: ["daemon", "mcp"],
+    evidenceOnly: ["daemon", "mcp", "desktop"],
     totalRuntimeMs: Date.now() - startedAtMs,
     exitCode: gatePassed ? 0 : 1,
   };
@@ -84,7 +96,7 @@ async function main() {
     runStamp,
     startedAt: new Date(startedAtMs).toISOString(),
     host: { platform: process.platform, node: process.version },
-    stages: { daemon, record, finalize, transcribe, mcp },
+    stages: { daemon, record, finalize, transcribe, mcp, desktop },
     details: stageDetails,
     summary,
   };
@@ -491,6 +503,171 @@ async function stageTranscriptMcp() {
   } finally {
     await resource.close();
   }
+}
+
+/**
+ * Stage 5 (Task 12, evidence-only): DEV desktop launch. Spawns
+ * `npm run runtime:desktop` under `timeout -k 5 30` with a tmp runtime root
+ * and dedicated daemon/renderer ports, then polls the renderer origin the dev
+ * desktop serves (dev mode spawns the expo web server at
+ * MEETLESS_RENDERER_ORIGIN). Success = the renderer origin answered HTTP 200
+ * OR the launcher stayed alive >= 15s. Truthful capture either way: a failure
+ * here is recorded as ok:false with the first output line, not as proof
+ * failure, mirroring the daemon probe.
+ */
+async function stageDesktopDev(display) {
+  const runtimeRoot = await mkdtempTmp("meetless-proof-desktop-");
+  const outputLines = [];
+  const startedAt = Date.now();
+  const launcher = display.xvfb ? "xvfb-run" : "timeout";
+  const launcherArgs = display.xvfb
+    ? ["-a", "timeout", "-k", "5", "30", "npm", "run", "runtime:desktop"]
+    : ["-k", "5", "30", "npm", "run", "runtime:desktop"];
+  // detached:true gives the launcher its own session so the proof can stop the
+  // whole desktop tree with a group signal; `timeout` (non-foreground mode)
+  // additionally signals its child group at the 30s bound.
+  const child = spawn(launcher, launcherArgs, {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      MEETLESS_RUNTIME_ROOT: runtimeRoot,
+      MEETLESS_LISTEN: DESKTOP_LISTEN,
+      MEETLESS_RENDERER_ORIGIN: DESKTOP_RENDERER_ORIGIN,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
+  });
+  const exitPromise = new Promise((resolve) => {
+    child.once("exit", (code, signal) => resolve({ code, signal, at: Date.now() }));
+    child.once("error", (error) => resolve({ code: null, signal: null, at: Date.now(), error: error.message }));
+  });
+  const capture = (chunk) => {
+    for (const line of String(chunk).split(/\r?\n/u)) {
+      if (line.trim() && outputLines.length < 80) outputLines.push(line.trim());
+    }
+  };
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", capture);
+  child.stderr.on("data", capture);
+
+  let rendererFirst200Ms = null;
+  let stopResult = null;
+  try {
+    rendererFirst200Ms = await waitForRendererHttp200(DESKTOP_RENDERER_ORIGIN, 32_000, child);
+    // One run records both success facts: keep the desktop up through the 15s
+    // liveness threshold once the renderer answered, then reap the tree.
+    const remainingForAlive = 15_000 - (Date.now() - startedAt);
+    if (rendererFirst200Ms !== null && remainingForAlive > 0 && child.exitCode === null && child.signalCode === null) {
+      await delay(remainingForAlive);
+    }
+    stopResult = await stopProcessGroup(child, exitPromise);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      stopResult = (await stopProcessGroup(child, exitPromise).catch(() => "stop failed")) ?? stopResult;
+    }
+  }
+  const exitInfo = await exitPromise;
+  const aliveMs = exitInfo.at - startedAt;
+
+  // The desktop CLI TERMs its detached daemon/renderer/electron children on
+  // SIGTERM; give that a grace window and record what actually closed.
+  const portsClosedAfterExit = await waitForPortsClosed([DESKTOP_DAEMON_PORT, DESKTOP_RENDERER_PORT], 6_000);
+  stageDetails.desktop = {
+    display: display.mode,
+    runtimeRoot,
+    listen: DESKTOP_LISTEN,
+    rendererOrigin: DESKTOP_RENDERER_ORIGIN,
+    rendererFirst200Ms,
+    aliveMs,
+    exit: stopResult,
+    portsClosedAfterExit,
+    output: outputLines,
+  };
+  await rmTmp(runtimeRoot);
+
+  if (exitInfo.error) throw new Error(`desktop launcher failed to start: ${exitInfo.error}`);
+  const ok = rendererFirst200Ms !== null || aliveMs >= 15_000;
+  if (ok) {
+    return {
+      artifact: DESKTOP_RENDERER_ORIGIN,
+      detail: {
+        display: display.mode,
+        rendererHttp200: rendererFirst200Ms !== null,
+        rendererFirst200Ms,
+        aliveMs,
+        exit: stopResult,
+      },
+    };
+  }
+  const firstError = outputLines.find((line) => /error|cannot|denied|throw|exception|not found|failed/iu.test(line))
+    ?? outputLines[0]
+    ?? "desktop produced no output";
+  throw new Error(`dev desktop stayed alive ${aliveMs}ms without serving the renderer; ${firstError}`.slice(0, 300));
+}
+
+/** Display availability for the desktop stage: real display or xvfb-run. */
+function resolveDesktopDisplay() {
+  if (process.env.DISPLAY) return { available: true, mode: `DISPLAY=${process.env.DISPLAY}` };
+  if (process.env.WAYLAND_DISPLAY) return { available: true, mode: `WAYLAND_DISPLAY=${process.env.WAYLAND_DISPLAY}` };
+  if (commandExists("xvfb-run")) return { available: true, mode: "xvfb-run -a", xvfb: true };
+  return { available: false, reason: "DISPLAY and WAYLAND_DISPLAY are unset and xvfb-run is not on PATH" };
+}
+
+async function waitForRendererHttp200(origin, timeoutMs, child) {
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.signalCode !== null) return null;
+    if (await httpOk(origin)) return Date.now() - startedAt;
+    await delay(500);
+  }
+  return null;
+}
+
+async function httpOk(origin) {
+  try {
+    const response = await fetch(origin, { redirect: "manual", signal: AbortSignal.timeout(1_500) });
+    return response.status === 200;
+  } catch {
+    return false;
+  }
+}
+
+async function stopProcessGroup(child, exitPromise) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return describeObservedExit(await exitPromise);
+  }
+  signalBestEffort(child.pid, "SIGTERM");
+  const graceful = await Promise.race([exitPromise.then(describeObservedExit), delay(3_000).then(() => null)]);
+  if (graceful) return graceful;
+  signalBestEffort(child.pid, "SIGKILL");
+  const killed = await Promise.race([exitPromise.then(describeObservedExit), delay(3_000).then(() => null)]);
+  return killed ?? "SIGKILL (exit unobserved)";
+}
+
+function signalBestEffort(pgid, signal) {
+  for (const target of [-pgid, pgid]) {
+    try {
+      process.kill(target, signal);
+    } catch { /* group or leader already gone */ }
+  }
+}
+
+function describeObservedExit(exit) {
+  if (exit.error) return `spawn error: ${exit.error}`;
+  return exit.code !== null ? `exit ${exit.code}` : `signal ${exit.signal ?? "unknown"}`;
+}
+
+async function waitForPortsClosed(ports, timeoutMs) {
+  const closed = {};
+  const deadline = Date.now() + timeoutMs;
+  do {
+    for (const port of ports) closed[port] = !(await tcpConnects(port));
+    if (ports.every((port) => closed[port])) return closed;
+    await delay(300);
+  } while (Date.now() < deadline);
+  return closed;
 }
 
 function assertPreconditions() {
