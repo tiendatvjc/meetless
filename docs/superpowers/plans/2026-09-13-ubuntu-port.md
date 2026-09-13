@@ -1131,9 +1131,165 @@ git push -u fork linux-port
 
 ---
 
+### Task 10: Desktop Electron shell — nhánh dev Linux
+
+> Thêm sau quyết định của chủ sở hữu 2026-09-13: phạm vi "Đầy đủ có app desktop". Dựa trên dữ kiện: `packages/runtime/src/desktop.ts:195-220` — nhánh dev spawn `process.execPath + [electron/cli.js, scripts/electron-bootstrap.mjs]`; yêu cầu `MAC_CHROMIUM_TMPDIR` chỉ áp dụng `isMacAppStoreDesktop`.
+
+**Files:**
+- Modify: `packages/runtime/src/desktop.ts` (chỉ nếu env/build nhánh linux thiếu)
+- Test: `packages/runtime/test/linux-desktop-spawn.test.ts`
+
+**Interfaces:**
+- Produces: `buildElectronSpawnOptions` hoạt động trên linux không-MAS: không đòi `MAC_CHROMIUM_TMPDIR`, command = `process.execPath`, args = `[<electron/cli.js>, <scripts/electron-bootstrap.mjs>, ...]`. Test khoá hợp đồng này.
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+import { describe, expect, it } from "vitest";
+import { buildElectronSpawnOptions } from "../src/desktop.js";
+
+function linuxDevConfig(): Parameters<typeof buildElectronSpawnOptions>[0] {
+  return {
+    packageResources: null,
+    paths: { electronUserData: "/tmp/meetless-electron" },
+  } as never; // cấu hình dev tối thiểu — hiệu chỉnh theo type thật khi viết test
+}
+
+describe("buildElectronSpawnOptions on linux dev", () => {
+  it("launches electron through the node dev shim without MAC chromium temp", () => {
+    const options = buildElectronSpawnOptions(linuxDevConfig(), "http://127.0.0.1:8099/", {}, null);
+    expect(options.command).toBe(process.execPath);
+    expect(options.args.join(" ")).toContain("electron");
+    expect(options.args.join(" ")).toContain("electron-bootstrap.mjs");
+    expect(options.env.MAC_CHROMIUM_TMPDIR).toBeUndefined();
+  });
+});
+```
+
+(Hiệu chỉnh fixture config theo type `RuntimeConfig` thật — đọc `packages/runtime/src/desktop.ts:195-220` và `config.ts` để lấy trường bắt buộc; giữ nguyên 3 assertion.)
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd packages/runtime && npx vitest run test/linux-desktop-spawn.test.ts`
+Expected: FAIL hoặc throw vì fixture chưa khớp type / import.
+
+- [ ] **Step 3: Implement/adjust**
+
+Nếu test fail do nhánh MAS branch điều kiện: sửa điều kiện đầu hàm thành chỉ áp dụng khi `isMacAppStoreDesktop(config)` (đã đúng theo code hiện tại — chủ yếu là fixture). Không đổi logic darwin.
+
+- [ ] **Step 4: Run test + smoke dev thật**
+
+Run: `cd packages/runtime && npx vitest run test/linux-desktop-spawn.test.ts` → PASS.
+Smoke (máy có display): `npm run build:paseo:types && npm run build:meetless && npm run build:app && MEETLESS_RUNTIME_ROOT=/tmp/meetless-dev npm run runtime:desktop` — cửa sổ Electron mở và tải renderer; Ctrl+C thoát sạch. Ghi kết quả vào `docs/linux-development.md`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/runtime/test/linux-desktop-spawn.test.ts packages/runtime/src/desktop.ts docs/linux-development.md
+git commit -m "linux-port: desktop electron dev launch contract on linux"
+```
+
+---
+
+### Task 11: Đóng gói AppImage + deb
+
+**Files:**
+- Create: `scripts/package-linux.mjs`
+- Create: `scripts/linux/electron-builder.meetless.yml`
+- Modify: `package.json` (scripts `package:linux`)
+
+**Interfaces:**
+- Produces: `npm run package:linux` — build (paseo types + meetless + app export), render `release/linux/` chứa `Meetless-<version>-x86_64.AppImage` và `meetless_<version>_amd64.deb`; artifacts chạy được qua `--appimage-extract` check + `dpkg-deb --info`.
+
+- [ ] **Step 1: Viết builder config `scripts/linux/electron-builder.meetless.yml`**
+
+```yaml
+appId: com.meetless.app
+productName: Meetless
+executableName: Meetless
+directories:
+  output: release/linux
+files:
+  - dist-meetless/runtime/**/*
+  - dist-meetless/plugin/**/*
+  - dist-meetless/renderer/**/*
+  - scripts/electron-bootstrap.mjs
+asarUnpack:
+  - dist-meetless/runtime/**
+extraResources: []
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Utility
+  icon: scripts/linux/icon.png
+```
+
+(`scripts/linux/icon.png`: lấy từ `design/` assets hiện có — tìm `fd -e png . design/ | head`, chọn icon app, resize 512×512 nếu cần bằng `ffmpeg -i in.png -vf scale=512:512 out.png`.)
+
+- [ ] **Step 2: Viết orchestration `scripts/package-linux.mjs`**
+
+Khung: (1) chạy `npm run build:paseo:types`, `npm run build:meetless`, `npm run build:app`; (2) lắp `dist-meetless/` = `packages/runtime/dist` + `packages/meetless-plugin/dist` + `packages/meetless-app/dist` (renderer); (3) `npx electron-builder --config scripts/linux/electron-builder.meetless.yml --linux AppImage deb` (chạy trong `vendor/paseo/packages/desktop` để dùng devDependency `electron-builder` ở đó, trỏ `directories.output` về绝对路径 `release/linux` của repo meetless); (4) kiểm artifact tồn tại + in sha256.
+
+- [ ] **Step 3: Chạy đóng gói**
+
+Run: `npm run package:linux`
+Expected: 2 artifacts trong `release/linux/` + manifest sha256 in ra.
+
+- [ ] **Step 4: Kiểm chứng artifact**
+
+Run: `cd release/linux && ./Meetless-*-x86_64.AppImage --appimage-extract >/dev/null && ls squashfs-root/ | head && dpkg-deb --info meetless_*_amd64.deb | head -8`
+Expected: extract thành công có `Meetless` executable; metadata deb đúng appId/productName.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add scripts/package-linux.mjs scripts/linux package.json release/.gitignore 2>/dev/null || git add scripts/package-linux.mjs scripts/linux package.json
+git commit -m "linux-port: appimage and deb packaging for the meetless desktop app"
+```
+
+---
+
+### Task 12: Proof desktop + validation cuối
+
+**Files:**
+- Modify: `scripts/prove-linux-port.mjs` (thêm stage desktop)
+- Modify: `docs/linux-development.md` (bằng chứng verified-on)
+
+**Interfaces:**
+- Consumes: Task 9 proof (headless), Task 11 artifacts.
+
+- [ ] **Step 1: Thêm stage desktop vào proof**
+
+Stage 5 trong `prove-linux-port.mjs`: nếu có display (`process.env.DISPLAY` hoặc `WAYLAND_DISPLAY`) hoặc có `xvfb-run`: khởi AppImage qua `--ozone-platform=` an toàn hoặc `xvfb-run -a ./Meetless-*.AppImage --no-sandbox`, đợi 8s, kiểm process sống, TERM sạch; không display → stage `skipped` với lý do (không fail).
+
+- [ ] **Step 2: Chạy proof đầy đủ**
+
+Run: `npm run proof:linux`
+Expected: mọi stage `ok: true` hoặc desktop `skipped` có lý do; exit 0.
+
+- [ ] **Step 3: Validation tổng**
+
+Run: `npm run build:paseo:types && npx tsc -b tsconfig.build.json --pretty false && npx vitest run --config vitest.config.ts 2>&1 | tail -8`
+Expected: sạch và pass toàn bộ.
+
+- [ ] **Step 4: Ghi bằng chứng smoke desktop vào docs**
+
+Mở AppImage trên máy thật (hoặc `xvfb-run`), xác nhận: cửa sổ Meetless hiện, renderer tải, danh sách meetings từ daemon hiện. Ghi ngày + máy + kết quả vào `docs/linux-development.md` mục "Verified on".
+
+- [ ] **Step 5: Commit + push**
+
+```bash
+git add scripts/prove-linux-port.mjs docs/linux-development.md
+git commit -m "linux-port: desktop proof stage and final validation evidence"
+git push fork linux-port
+```
+
+---
+
 ## Phạm vi kế hoạch sau (chưa làm trong plan này)
 
-- Desktop Electron shell + AppImage/deb trên Linux (spec §6).
 - Managed Convex self-host bật trên Linux.
 - Capture helper native libpipewire (nếu `parec` monitor không đủ).
+- Snap/Flatpak (chỉ AppImage + deb trong plan này).
 - Rebase định kỳ từ `hoangnb24/meetless` upstream.

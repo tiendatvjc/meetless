@@ -21,8 +21,8 @@ ghi âm cuộc họp (micro + system audio qua PipeWire)
 
 | # | Quyết định | Lý do | Đổi được không |
 |---|---|---|---|
-| A1 | Phạm vi **headless + web**: daemon + plugin + capture + web companion + MCP. Bỏ desktop Electron shell và AppImage ở kế hoạch này | Đụng ít nhất vào vendor/paseo; Paseo desktop packaging là lớp macOS-specific lớn nhất | Có — nâng cấp thành phase riêng |
-| A2 | Transcription: **BYOK trước** (key OpenAI của người dùng, gọi trực tiếp); managed Convex giữ nguyên code nhưng không bật trên Linux | `docs/product/monetization.md` đã định nghĩa BYOK là route miễn phí có quyền ưu tiên; RevenueCat không có SDK Linux nên premium gate không hoạt động | Có — muốn self-host Convex managed thì thêm sau |
+| A1 | Phạm vi **đầy đủ có app desktop** (chủ sở hữu chọn 2026-09-13): tasks nền tảng 1-9 (headless + web) + tasks 10-12 desktop Electron shell và đóng gói AppImage/deb | Chủ sở hữu trả lời câu hỏi phạm vi: "Đầy đủ có app desktop". Nhánh dev của `desktop.ts` vốn đã đa nền tảng (`electron/cli.js` + `scripts/electron-bootstrap.mjs`); nhánh MAS-Chromium chỉ áp dụng packaged macOS | Đã chốt |
+| A2 | Transcription: **BYOK trước** (key OpenAI của người dùng, gọi trực tiếp; chủ sở hữu xác nhận 2026-09-13); managed Convex giữ nguyên code nhưng không bật trên Linux | `docs/product/monetization.md` đã định nghĩa BYOK là route miễn phí có quyền ưu tiên; RevenueCat không có SDK Linux nên premium gate không hoạt động | Đã chốt |
 | A3 | Premium/RevenueCat trên Linux = **no-op "inactive"**; managed route từ chối với thông báo rõ; BYOK không bị gate | Không phá chính sách sản phẩm, không xóa code macOS | Có |
 | A4 | Submodule paseo pin `ee3420e` (tag `meetless-v1-base-2026-08-16`) thay vì gitlink `a2c8ff34` | `a2c8ff34` đã bị force-push mất, không fetch được từ bất kỳ nhánh nào của `hoangnb24/paseo`; `ee3420e` là base được `docs/paseo-p0-inventory.md` tuyên bố | Thỏa thuận lại với upstream nếu commit cũ quay lại |
 | A5 | Cả hai repo fork về `tiendatvjc` (đã tạo) | Làm fork tự chủ, submodule trỏ về paseo fork của mình | Có |
@@ -51,6 +51,8 @@ systemd user service meetless-daemon.service        (thay LaunchServices→Meetl
               └─ MCP transcript server (chat citations — dùng nguyên)
 Web companion: npm run runtime:web (Expo web, port 8082) — không đổi
 Coding agent: Codex/Claude Code qua Paseo — không đổi
+Desktop (tasks 10-12): Electron (paseo desktop) chạy renderer Expo export
+  từ isolated origin — đường dev đã đa nền tảng; đóng gói AppImage + deb
 ```
 
 Nguyên tắc giữ nguyên từ ADR0003: **MeetingStore là nguồn chân lý duy nhất**; companion chỉ giữ pairing state; readiness = daemon + plugin + capture helper đồng thuận. Những gì bỏ qua trên Linux là **attestation codesign + TCC + MAS packaging**, không phải ranh giới dữ liệu.
@@ -96,9 +98,14 @@ Nguyên tắc giữ nguyên từ ADR0003: **MeetingStore là nguồn chân lý d
 - Tích hợp: chạy `CaptureHelper` (class hiện có, không đổi) qua entry fixture của helper linux — chứng minh helper nói đúng giao thức.
 - Smoke thủ công (ghi in tài liệu): `pw-play` fixture wav → record thật 2 nguồn → kiểm tra MP3+WAV trong `~/Documents/meetings`.
 
+### 5.7 Desktop Electron shell trên Linux (tasks 10-12)
+
+- **Dev**: `runtime:desktop` dùng nhánh sẵn có của `desktop.ts` — `buildElectronSpawnOptions` với command `process.execPath` + args `[electron/cli.js, scripts/electron-bootstrap.mjs]` khi không phải MAS packaged (đã kiểm chứng dòng 195-220: yêu cầu `MAC_CHROMIUM_TMPDIR` chỉ áp dụng nhánh `isMacAppStoreDesktop`). Việc cần làm: test unit cho nhánh linux của spawn options + smoke mở cửa sổ tải renderer origin.
+- **Renderer**: giữ nguyên kiến trúc host-owned isolated renderer origin; renderer build bằng `npm run build:app` (`expo export --platform web`) — không đổi.
+- **Đóng gói**: `scripts/package-linux.mjs` + cấu hình electron-builder target `AppImage` + `deb` (appId `com.meetless.app`, productName `Meetless`, icon từ `design/`), bỏ after-sign (không ký trên Linux), `packageResources.electronBinary` trỏ binary Electron đóng gói kèm `meetless runtime` + renderer dist. Không dùng electron-builder.yml của paseo (appId/thumbnail khác) — viết config riêng cho meetless.
+
 ## 6. Phạm vi loại trừ (kế hoạch này)
 
-- Desktop Electron shell + AppImage/deb (phase sau nếu duyệt A1 đổi).
 - Managed Convex self-host trên Linux (giữ code, không bật).
 - App Store, notarization, RevenueCat purchase flow trên Linux.
 - Speaker diarization, cross-meeting Q&A (đã ngoài V1 upstream).
