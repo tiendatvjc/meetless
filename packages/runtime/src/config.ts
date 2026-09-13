@@ -46,6 +46,44 @@ export function platformRecordingExportsRelativePath(platform: NodeJS.Platform):
   throw new Error(`unsupported platform: ${platform}`);
 }
 
+export interface CaptureHelperCommand {
+  executable: string;
+  arguments: string[];
+}
+
+/**
+ * Linux-port capture helper spawn shape (spec §5.2): the linux dev helper is a
+ * Node entry script, so it must run as `<node> <entry>` rather than being
+ * exec'd directly. The runtime materializes an executable wrapper carrying
+ * exactly this command (see prepareRuntime), because the plugin attestation
+ * contract binds MEETLESS_CAPTURE_HELPER to the single spawned executable and
+ * forbids helper arguments in production mode. Darwin keeps the native binary
+ * default and returns null here.
+ */
+export function captureHelperCommand(
+  platform: NodeJS.Platform,
+  entryPath?: string,
+): CaptureHelperCommand | null {
+  if (platform === "darwin") return null;
+  if (platform !== "linux") throw new Error(`unsupported platform: ${platform}`);
+  return {
+    executable: process.execPath,
+    arguments: [entryPath ?? linuxDevelopmentCaptureHelperEntry()],
+  };
+}
+
+/** Dev-mode linux helper entry inside the built plugin tree. */
+export function linuxDevelopmentCaptureHelperEntry(repositoryRoot: string = REPOSITORY_ROOT): string {
+  return path.join(
+    repositoryRoot,
+    "packages", "meetless-plugin", "dist", "src", "linux", "capture-helper-entry.js",
+  );
+}
+
+/** Runtime-root-relative name of the dev wrapper prepareRuntime materializes on linux. */
+export const LINUX_DEVELOPMENT_CAPTURE_HELPER_RELATIVE_PATH = "capture-helper";
+
+
 /** Kept for the packaged macOS runtime; Linux resolves through the functions above. */
 export const MEETLESS_USER_SUPPORT_RELATIVE_PATH = platformUserSupportRelativePath("darwin");
 export const MEETLESS_RECORDING_EXPORTS_RELATIVE_PATH = platformRecordingExportsRelativePath("darwin");
@@ -346,15 +384,7 @@ export function resolveRuntimeConfig(input: {
   const macAppStore = isMacAppStoreInstallationContract(installationContract);
   const stateRoots = macAppStore
     ? resolveMacAppStoreStateRoots(userHome, sourceEnvironment, installationContract)
-    : {
-      runtimeRoot: resolveUserHomePath(userHome, installationContract.userSupportRelativePath, "user support root"),
-      recordingExports: resolveUserHomePath(
-        userHome,
-        installationContract.recordingExportsRelativePath,
-        "recording exports",
-      ),
-      containerSupportRoot: null,
-    };
+    : resolveDevelopmentStateRoots(userHome, installationContract, packaged);
   const acceptedSupportRoot = stateRoots.runtimeRoot;
   const acceptedRecordingExports = stateRoots.recordingExports;
   const requestedRuntimeRoot = input.runtimeRoot ?? sourceEnvironment.MEETLESS_RUNTIME_ROOT;
@@ -489,8 +519,7 @@ export function resolveRuntimeConfig(input: {
     config: path.join(paseoHome, "config.json"),
     manifest: path.join(root, runtimeLayout.manifestRelativePath),
     plugin: path.join(repositoryRoot, "packages", "meetless-plugin"),
-    captureHelper: packageResources?.captureHelper ??
-      path.join(repositoryRoot, "native", "macos-capture", ".build", "release", "meetless-capture"),
+    captureHelper: packageResources?.captureHelper ?? defaultCaptureHelperPath(repositoryRoot, root, packaged),
     recordingSocket: endpoints.recording.canonicalPath,
     transcriptionSocket: endpoints.transcription.canonicalPath,
     transcriptionStaging: path.join(root, runtimeLayout.transcriptionStagingRelativePath),
@@ -609,6 +638,41 @@ function readSourceInstallationContract(repositoryRoot: string): InstallationCon
 function isMacAppStoreInstallationContract(contract: InstallationContract): boolean {
   return contract.userSupportRelativePath === MACOS_APP_STORE_RUNTIME_ROOT_RELATIVE_PATH &&
     contract.recordingExportsRelativePath === MACOS_APP_STORE_RECORDING_EXPORTS_RELATIVE_PATH;
+}
+
+/**
+ * Non-MAS state roots. Linux-port (Issue 2): an unpackaged linux run resolves
+ * its dev-mode roots through the platform path functions instead of the macOS
+ * package contract, so a bare `cli.js daemon` defaults to
+ * ~/.local/share/meetless rather than ~/Library/Application Support/Meetless.
+ * Packaged (macOS) and darwin dev keep the installation-contract resolution
+ * byte-identical.
+ */
+function resolveDevelopmentStateRoots(
+  userHome: string,
+  contract: InstallationContract,
+  packaged: boolean,
+): { runtimeRoot: string; recordingExports: string; containerSupportRoot: null } {
+  if (!packaged && process.platform === "linux") {
+    return {
+      runtimeRoot: resolveUserHomePath(userHome, platformUserSupportRelativePath("linux"), "user support root"),
+      recordingExports: resolveUserHomePath(
+        userHome,
+        platformRecordingExportsRelativePath("linux"),
+        "recording exports",
+      ),
+      containerSupportRoot: null,
+    };
+  }
+  return {
+    runtimeRoot: resolveUserHomePath(userHome, contract.userSupportRelativePath, "user support root"),
+    recordingExports: resolveUserHomePath(
+      userHome,
+      contract.recordingExportsRelativePath,
+      "recording exports",
+    ),
+    containerSupportRoot: null,
+  };
 }
 
 function resolveMacAppStoreStateRoots(
@@ -808,6 +872,65 @@ function resolveUserHomePath(userHome: string, relativePath: string, label: stri
   return path.resolve(userHome, ...relativePath.split("/"));
 }
 
+/**
+ * Dev capture helper default. Linux-port (Issue 1): MEETLESS_CAPTURE_HELPER
+ * must name a directly executable file (the plugin spawns it verbatim and the
+ * readiness attestation pins its identity), so linux dev points at the
+ * runtime-root wrapper materialized by prepareRuntime. Darwin keeps the Swift
+ * build artifact default.
+ */
+function defaultCaptureHelperPath(repositoryRoot: string, runtimeRoot: string, packaged: boolean): string {
+  if (!packaged && process.platform === "linux") {
+    return path.join(runtimeRoot, LINUX_DEVELOPMENT_CAPTURE_HELPER_RELATIVE_PATH);
+  }
+  return path.join(repositoryRoot, "native", "macos-capture", ".build", "release", "meetless-capture");
+}
+
+/**
+ * Linux dev capture helper wrapper (spec §5.2): writes an executable
+ * `#!/bin/sh` wrapper at paths.captureHelper that execs
+ * `captureHelperCommand("linux")` — the running Node over the built plugin
+ * entry — passing arguments (notably `--fixture`) through untouched. The
+ * wrapper is rewritten on every daemon start so the pinned Node path tracks
+ * the launching runtime. Exported for the dev-seam tests; production callers
+ * reach it through prepareRuntime.
+ */
+export async function materializeLinuxDevelopmentCaptureHelper(config: RuntimeConfig): Promise<void> {
+  // paths.plugin is <repositoryRoot>/packages/meetless-plugin; recover the
+  // repository root that REPOSITORY_ROOT-relative defaults are joined against.
+  const repositoryRoot = path.dirname(path.dirname(config.paths.plugin));
+  const entry = linuxDevelopmentCaptureHelperEntry(repositoryRoot);
+  const command = captureHelperCommand("linux", entry);
+  if (!command) throw new Error("linux development capture helper command is unavailable");
+  await stat(entry).catch(() => {
+    throw new Error(
+      `Linux development capture helper entry is missing: ${entry}. ` +
+        "Next action: build the plugin with npm run build:meetless before starting the daemon.",
+    );
+  });
+  const wrapper =
+    "#!/bin/sh\n" +
+    "# Meetless linux development capture helper (linux-port spec 5.2).\n" +
+    "# Materialized by the Meetless runtime; execs the Node entry with the runtime's Node.\n" +
+    `exec ${shellQuote(command.executable)} ${shellQuote(command.arguments[0]!)} "$@"\n`;
+  const wrapperPath = config.paths.captureHelper;
+  const stagingWrapperPath = `${wrapperPath}.staging-${process.pid}`;
+  assertContainedPath(stagingWrapperPath, config.paths.root, "linux development capture helper staging");
+  const handle = await open(stagingWrapperPath, "w", 0o755);
+  try {
+    await handle.writeFile(wrapper, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  await rename(stagingWrapperPath, wrapperPath);
+  await chmod(wrapperPath, 0o755);
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/gu, `'\\''`)}'`;
+}
+
 function assertPackagedResourceResolution(candidate: string, packageRoot: string, label: string): void {
   let packageRootReal;
   try {
@@ -982,6 +1105,9 @@ export async function prepareRuntime(config: RuntimeConfig): Promise<void> {
       config.paths.logs,
     ].map((directory) => mkdir(directory, { recursive: true, mode: 0o700 })),
   );
+  if (!config.packaged && process.platform === "linux") {
+    await materializeLinuxDevelopmentCaptureHelper(config);
+  }
   const [ffmpeg, ffprobe] = config.packaged
     ? await packagedMediaTools(config)
     : await developmentMediaTools(config);
