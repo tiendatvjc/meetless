@@ -594,11 +594,70 @@ export async function assertDesktopLaunchedByHost(
   dependencies: HostInspectionDependencies = defaultDependencies,
 ): Promise<HostIdentity> {
   if (isPackagedRuntime(config)) return (await attestPackagedDesktop(config, currentPid)).identity;
+  if (isLinuxDevelopmentLaunch(config, dependencies)) return linuxDevelopmentHostIdentity(config);
   const identity = await assertInstalledHostIdentity(config, dependencies);
   const desktop = await dependencies.inspectProcess(currentPid);
   const host = await dependencies.inspectProcess(desktop.ppid);
   await assertExactTopology(identity, desktop, host, config, dependencies.inspectLiveHost);
   return identity;
+}
+
+/**
+ * Linux development launch (linux-port): the production host-attestation stack
+ * — codesign, plutil, and LaunchServices ancestry — exists only on macOS, so
+ * an unpackaged linux launch cannot present `/Applications/Meetless.app`. It
+ * skips that macOS bundle attestation and instead attests the exact
+ * supervising executable of the dev launch. The bypass is deliberately
+ * narrower than the platform: packaged linux runs keep the native packaged
+ * attestation path, and injected inspection dependencies (the darwin
+ * attestation contract tests) always keep the full darwin behavior.
+ */
+function isLinuxDevelopmentLaunch(config: RuntimeConfig, dependencies: HostInspectionDependencies): boolean {
+  return process.platform === "linux" && !isPackagedRuntime(config) && dependencies === defaultDependencies;
+}
+
+export const LINUX_DEVELOPMENT_HOST_DESIGNATED_REQUIREMENT = "linux-development-host";
+
+/**
+ * Linux dev ownership probe: `/proc/<pid>/stat` field 4 (ppid). The darwin
+ * inspector stack (`ps`/`lsof`/`codesign`) is not used here so the dev bypass
+ * stays independent of the macOS production tooling.
+ */
+async function linuxDevelopmentSupervisorParentPid(supervisorPid: number): Promise<number> {
+  if (!Number.isInteger(supervisorPid) || supervisorPid <= 1) {
+    throw hostFailure(`linux dev supervisor PID ${supervisorPid} is not a valid child process`);
+  }
+  let stat: string;
+  try {
+    stat = await readFile(`/proc/${supervisorPid}/stat`, "utf8");
+  } catch (error) {
+    throw hostFailure(`cannot inspect linux dev supervisor PID ${supervisorPid}: ${message(error)}`);
+  }
+  const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  const ppid = Number(fields[1]);
+  if (!Number.isInteger(ppid)) {
+    throw hostFailure(`cannot read the parent PID of linux dev supervisor PID ${supervisorPid}`);
+  }
+  return ppid;
+}
+
+async function linuxDevelopmentHostIdentity(config: RuntimeConfig): Promise<HostIdentity> {
+  const executablePath = await realpath(process.execPath);
+  const [executable, executableInfo] = await Promise.all([readFile(executablePath), stat(executablePath)]);
+  return HostIdentitySchema.parse({
+    version: 1,
+    bundleIdentifier: MEETLESS_HOST_BUNDLE_ID,
+    bundlePath: path.resolve(process.execPath),
+    bundleRealPath: executablePath,
+    executablePath,
+    designatedRequirement: LINUX_DEVELOPMENT_HOST_DESIGNATED_REQUIREMENT,
+    cdHash: createHash("sha1").update(executable).digest("hex"),
+    binarySha256: createHash("sha256").update(executable).digest("hex"),
+    binaryDevice: executableInfo.dev,
+    binaryInode: executableInfo.ino,
+    binarySize: executableInfo.size,
+    configuration: expectedHostConfiguration(config),
+  });
 }
 
 export interface PackagedDesktopAttestation {
@@ -896,6 +955,16 @@ export async function assertSupervisorOwnedByHost(
 }> {
   if (isPackagedRuntime(config)) {
     throw hostFailure("packaged supervisor ownership must use the native host process attestation provider");
+  }
+  if (isLinuxDevelopmentLaunch(config, dependencies)) {
+    const identity = await linuxDevelopmentHostIdentity(config);
+    const supervisorPpid = await linuxDevelopmentSupervisorParentPid(supervisorPid);
+    if (supervisorPpid !== process.pid) {
+      throw hostFailure(
+        `linux dev supervisor PID ${supervisorPid} is not owned by this desktop runtime (parent PID ${supervisorPpid})`,
+      );
+    }
+    return { identity, hostPid: process.pid, desktopPid: process.pid, supervisorPid };
   }
   const identity = await assertInstalledHostIdentity(config, dependencies);
   const supervisor = await dependencies.inspectProcess(supervisorPid);
