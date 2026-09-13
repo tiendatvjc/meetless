@@ -183,13 +183,32 @@ tạo và **hiển thị ngay trong giao diện desktop** ở màn hình "Connec
 
 ### Cách dùng ngay trên CÙNG một máy (khuyên dùng, đã cấu hình sẵn)
 
-Daemon đã lắng nghe `127.0.0.1:8081` và cho phép trang web `127.0.0.1:8082` kết nối:
+Daemon đã lắng nghe `127.0.0.1:8081`, cho phép trang web `127.0.0.1:8082` kết nối,
+và **đã đặt mật khẩu host** (bắt buộc — form Direct không cho bấm "Pair securely"
+nếu ô mật khẩu trống):
 
 1. Mở trình duyệt tại **http://localhost:8082** (hoặc nhìn cửa sổ desktop Meetless).
 2. Ở màn hình "Connect a companion" chọn kiểu **Direct connection** và nhập:
    - **Endpoint:** `127.0.0.1:8081`
-   - **Host password:** để trống (daemon nội bộ hiện không đặt mật khẩu)
+   - **Host password:** `meetless2026` (mật khẩu mặc định đã cài — đổi ngay như dưới)
 3. Bấm **Pair securely**. Từ đó companion nhớ thiết bị này, không phải làm lại.
+
+**Đổi mật khẩu host:** mật khẩu được lưu dạng hash bcrypt trong
+`~/.local/share/meetless/paseo-home/config.json` (mục `daemon.auth.password`).
+Cách đổi:
+
+```bash
+cd /home/dat/Applications/meetless
+HASH=$(node -e "console.log(require('bcryptjs').hashSync('MẬT-KHÓU-MỚI', 12))")
+python3 - "$HASH" <<'EOF'
+import json, sys
+p = "/home/dat/.local/share/meetless/paseo-home/config.json"
+cfg = json.load(open(p)); cfg["daemon"]["auth"] = {"password": sys.argv[1]}
+json.dump(cfg, open(p, "w"), indent=2)
+EOF
+systemctl --user restart meetless-daemon
+```
+(rồi dùng mật khẩu mới ở bước 2.)
 
 ### Kết nối từ ĐIỆN THOẠI / máy khác — 2 cách
 
@@ -216,9 +235,8 @@ Environment=MEETLESS_LISTEN=0.0.0.0:8081
 ```
 rồi `systemctl --user restart meetless-daemon`, mở tường lửa nếu có:
 `sudo ufw allow from 192.168.0.0/16 to any port 8081 proto tcp`.
-Endpoint trên điện thoại sẽ là `<IP-máy-tính>:8081` (xem IP bằng `hostname -I`).
-Việc đặt mật khẩu cho daemon nằm trong `~/.local/share/meetless/paseo-home/config.json`
-(mục `daemon`) — cấu hình nâng cao, chưa kiểm chứng trên bản port: chỉ mở khi cần.
+Endpoint trên điện thoại sẽ là `<IP-máy-tính>:8081` (xem IP bằng `hostname -I`),
+mật khẩu là mật khẩu host (mục trên).
 
 ### Khi máy desktop tắt
 
@@ -246,6 +264,7 @@ nằm ngoài phạm vi tài liệu này.
 | Báo thiếu `parec`/`pactl` | `sudo apt install pulseaudio-utils pipewire-pulse`. |
 | Ghi âm không có tiếng người đối diện | Kiểm tra loa máy tính đang phát (không phải tai nghe Bluetooth ở chế phạm vi gọi HFP), và `pactl info` phải chạy đúng PipeWire. |
 | Web không mở được ở :8082 | Kiểm tra Terminal `npm run runtime:web` còn đang chạy; thử cổng khác: `npm run start:web --workspace=@meetless/app -- --port 8083`. |
+| Nút "Pair securely" không bấm được | Form Direct yêu cầu ô mật khẩu KHÔNG được trống — nhập mật khẩu host (mục 5, mặc định `meetless2026`). Form Relay yêu cầu dán pairing link trước. |
 | Companion (điện thoại) không thấy máy | Cùng wifi? Đã bật `MEETLESS_LISTEN=0.0.0.0:8081` (mục 5)? Tường lửa: `sudo ufw allow from 192.168.0.0/16 to any port 8081 proto tcp`. |
 | Transcribe báo lỗi key | Kiểm tra file `~/.local/share/meetless/byok-openai.json`: key đúng định dạng `sk-...`, còn hiệu lực, tài khoản OpenAI còn credit. |
 | Transcribe báo hết hạn mức (quota) | Bản port này không dùng quota; nếu gặp thông báo liên quan premium/managed → chọn Transcribe lại bằng BYOK key (mục 4). |
