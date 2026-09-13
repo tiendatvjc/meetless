@@ -116,7 +116,10 @@ cd /home/dat/Applications/meetless && npm run runtime:web
 
 1. Bật daemon (mục trên) + mở giao diện web.
 2. Bắt đầu cuộc họp Zoom / Google Meet / Teams **trên chính máy này** (app hoặc web).
-3. Trong giao diện Meetless, bấm **bắt đầu ghi** (Record). Meetless thu **2 nguồn riêng**:
+   Meetless KHÔNG tự phát hiện cuộc họp — bạn chủ động ghi như dưới.
+3. Trong giao diện Meetless, màn hình *"Your meetings live here"* → bấm **"Record
+   meeting"** → ở màn hình thiết lập, **gõ tiêu đề cuộc họp** (bắt buộc — nút chỉ
+   bật khi có tiêu đề) → bấm **Start recording**. Meetless thu **2 nguồn riêng**:
    micro của bạn + âm thanh phát ra từ loa (giọng người đối diện).
 4. Cần tạm dừng thì bấm **Pause**, xong bấm **Resume**; kết thúc bấm **Stop**.
 5. File kết quả nằm ở **`~/Documents/meetings/`**: một file `.mp3` để nghe lại và một
