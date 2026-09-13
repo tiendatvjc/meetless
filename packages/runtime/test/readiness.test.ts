@@ -716,6 +716,10 @@ async function runtimeResponse(config: RuntimeConfig, overrides: {
 async function temporaryRoot(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), "meetless-readiness-"));
   roots.add(root);
+  // Linux-port Issue 1b: the dev capture-helper default is the runtime-root
+  // wrapper prepareRuntime materializes; the harness stages the same file so
+  // config.paths.captureHelper is statable without a real daemon launch.
+  await writeFile(path.join(root, "capture-helper"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   return root;
 }
 

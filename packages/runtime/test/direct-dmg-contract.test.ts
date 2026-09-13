@@ -73,9 +73,17 @@ describe("M7 direct-DMG installation contract", () => {
       recordingExports: "/Users/example/Documents/meetings",
     });
     const config = resolveRuntimeConfig({ userHome: "/Users/example", repositoryRoot: process.cwd() });
+    // Linux-port Issue 2: an unpackaged run resolves its per-user state through
+    // the platform path functions, so on linux the dev default is
+    // ~/.local/share/meetless while darwin keeps the macOS package contract
+    // byte-identical. The darwin-authored Library path above stays asserted by
+    // acceptedMacOSPackagePaths (the packaged macOS contract).
+    const expectedSupportRoot = process.platform === "linux"
+      ? "/Users/example/.local/share/meetless"
+      : "/Users/example/Library/Application Support/Meetless";
     expect(config.host).toEqual({
       bundle: "/Applications/Meetless.app",
-      identity: "/Users/example/Library/Application Support/Meetless/host-identity.json",
+      identity: path.join(expectedSupportRoot, "host-identity.json"),
     });
     expect(config.paths.recordingExports).toBe("/Users/example/Documents/meetings");
     expect(config.endpoints).toMatchObject({
