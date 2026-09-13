@@ -1184,6 +1184,8 @@ interface CapturePermissionBoundary {
   rendererOrigin: URL;
   nativeSocket?: string;
   nativeRequest: typeof nativeCapturePermissionRequest;
+  // linux-port: production linux has no native permission server to consult.
+  linuxWithoutNativeServer: boolean;
   now: () => number;
   intents: Map<string, number>;
 }
@@ -1197,6 +1199,7 @@ function createCapturePermissionBoundary(
     rendererOrigin,
     nativeSocket,
     nativeRequest: options.nativeRequest ?? nativeCapturePermissionRequest,
+    linuxWithoutNativeServer: process.platform === "linux" && !options.nativeRequest,
     now: options.now ?? Date.now,
     intents: new Map(),
   };
@@ -1221,8 +1224,8 @@ async function serveCapturePermissionRequest(
       return;
     }
     // linux-port: PipeWire/PulseAudio session capture has no TCC-style gate
-    // and no native transcription socket; report authorized before touching one.
-    if (process.platform === "linux") {
+    // and no native transcription server to consult; report authorized.
+    if (boundary.linuxWithoutNativeServer) {
       respondJson(response, 200, { microphone: "authorized", systemAudio: "authorized" }, noStoreHeaders);
       return;
     }
@@ -1262,7 +1265,7 @@ async function serveCapturePermissionRequest(
     return;
   }
   // linux-port: see the status branch above.
-  if (process.platform === "linux") {
+  if (boundary.linuxWithoutNativeServer) {
     respondJson(response, 200, { microphone: "authorized", systemAudio: "authorized" }, noStoreHeaders);
     return;
   }

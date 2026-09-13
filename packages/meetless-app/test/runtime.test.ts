@@ -23,8 +23,12 @@ describe("Meetless app runtime", () => {
     expect(supportsDesktopRecording()).toBe(true);
   });
 
-  test("query parameters and non-macOS Electron shells cannot grant recording", () => {
+  test("query parameters cannot grant recording, but a pinned linux Electron shell can", () => {
+    // linux-port: the linux port runs the same pinned bridge, so platform
+    // "linux" grants recording like "darwin"; bare query params never do.
     vi.stubGlobal("window", { location: { search: "?recording=true" }, paseoDesktop: { platform: "linux", invoke: vi.fn() } });
+    expect(supportsDesktopRecording()).toBe(true);
+    vi.stubGlobal("window", { location: { search: "?recording=true" } });
     expect(supportsDesktopRecording()).toBe(false);
   });
 
