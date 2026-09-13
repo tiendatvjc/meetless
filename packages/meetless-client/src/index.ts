@@ -79,7 +79,8 @@ export class DesktopRecordingClient {
   private readonly endpoints: RuntimeEndpointComposition;
 
   constructor(private readonly bridge: DesktopBridge, endpoints: unknown) {
-    if (bridge.platform !== "darwin" || typeof bridge.invoke !== "function" || typeof bridge.events?.on !== "function") {
+    if ((bridge.platform !== "darwin" && bridge.platform !== "linux") ||
+        typeof bridge.invoke !== "function" || typeof bridge.events?.on !== "function") {
       throw new MeetlessFeatureUnavailableError(
         "Desktop recording requires the pinned macOS Electron bridge; web, mobile, and URL parameters cannot grant it.",
       );

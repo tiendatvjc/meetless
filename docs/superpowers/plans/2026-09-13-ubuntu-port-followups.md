@@ -48,3 +48,5 @@ Branch `linux-port` (fork tiendatvjc/meetless), completed 2026-09-13. Spec: ../s
 - Boundary quyền linux ban đầu trả "granted" — hợp đồng UI yêu cầu "authorized" (CapturePermissionStatus enum); nút sáng nhưng start() từ chối âm thầm. Đã đổi sang "authorized" (status + request) — root cause cuối của "bấm không chạy".
 
 - ROOT CAUSE "bấm Start không chạy": supportsDesktopRecording() ép bridge platform === "darwin" (runtime.ts:27) — RecordingProvider enabled=false trên linux, client ghi không bao giờ được tạo, start() ném "not connected" và bị submit() nuốt im lặng. Fix: chấp nhận cả "linux". (Boundary "authorized" ở commit trước là điều kiện cần nhưng chưa đủ.)
+
+- Màn hình trắng sau khi bật provider: DesktopRecordingClient constructor ép bridge.platform === "darwin" (meetless-client index.ts:82) → MeetlessFeatureUnavailableError unmount app. Fix: chấp nhận "linux". Chuỗi 3 cổng darwin-gate đã mở đủ: runtime.ts (provider) → client constructor → boundary authorized.
