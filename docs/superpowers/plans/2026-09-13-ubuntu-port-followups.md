@@ -42,3 +42,5 @@ Branch `linux-port` (fork tiendatvjc/meetless), completed 2026-09-13. Spec: ../s
 - Companion phải mở bằng `http://127.0.0.1:8082` (localhost bị daemon từ chối origin cho tới khi follow-up trên land).
 
 - Web companion không có nút ghi: `canRecord={mode === "desktop"}` (App.tsx) — product boundary macOS. Đã đổi cho fork: companion cũng được ghi (linux-port: browser = primary surface; recording vẫn chạy daemon-side). Divergence so với docs/product/platforms.md "companions do not record" đã ghi ở đây.
+
+- Recording-setup bị khóa trên linux desktop: (1) endpoint /__meetless/capture-permissions chỉ tồn tại ở packaged renderer — dev spawn Expo nên UI lỗi quyền; (2) boundary đi vào socket transcription native (macOS) không tồn tại trên linux. Fix: MEETLESS_DEV_STATIC_RENDERER=1 serve expo export qua startPackagedRenderer (thêm rendererRootOverride), linux trả granted ở cả status/request trước khi chạm socket. Electron binary trong node_modules từng hỏng (dist rỗng) — phục hồi bằng unzip từ cache ~/.cache/electron + path.txt.

@@ -502,6 +502,24 @@ export async function runMeetlessDesktop(
         config.endpoints.transcription.bindArgument,
       );
       await waitForHttp(config.rendererOrigin, null, shutdown.signal);
+    } else if (process.env.MEETLESS_DEV_STATIC_RENDERER === "1") {
+      // linux-port: dev desktop serves the exported renderer bundle so the
+      // /__meetless capture-permission boundary exists without Metro.
+      const devRendererRoot = path.join(REPOSITORY_ROOT, "packages", "meetless-app", "dist");
+      if (!(await stat(path.join(devRendererRoot, "index.html")).catch(() => null))?.isFile()) {
+        throw new Error(
+          `Meetless dev static renderer is missing its export: ${devRendererRoot}. ` +
+          "Next action: run `npm run build:app` before launching the dev desktop with MEETLESS_DEV_STATIC_RENDERER=1.",
+        );
+      }
+      rendererServer = await startPackagedRenderer(
+        config,
+        shutdown.signal,
+        {},
+        config.endpoints.transcription.bindArgument,
+        devRendererRoot,
+      );
+      await waitForHttp(config.rendererOrigin, null, shutdown.signal);
     } else if (!process.env.MEETLESS_RENDERER_URL) {
       const appPort = new URL(config.rendererOrigin).port;
       renderer = spawn(
@@ -1026,8 +1044,9 @@ async function startPackagedRenderer(
   signal: AbortSignal,
   boundaryOptions: CapturePermissionBoundaryOptions = {},
   nativeSocket: string,
+  rendererRootOverride?: string,
 ): Promise<Server> {
-  const rendererRoot = config.packageResources?.rendererRoot;
+  const rendererRoot = rendererRootOverride ?? config.packageResources?.rendererRoot;
   if (!rendererRoot) {
     throw new Error(
       "Packaged Meetless renderer resource is unavailable. Authority: docs/specs/macos-artifact-validation.md. " +
@@ -1097,11 +1116,13 @@ export async function startPackagedRendererForTest(
   signal: AbortSignal,
   options: CapturePermissionBoundaryOptions & { nativeSocket?: string } = {},
 ): Promise<Server> {
-  const nativeSocket = options.nativeSocket ?? path.join(rendererRoot, "transcription.sock");
+  const nativeSocket = "nativeSocket" in options
+    ? options.nativeSocket
+    : path.join(rendererRoot, "transcription.sock");
   return startPackagedRenderer({
     packageResources: { rendererRoot } as RuntimeConfig["packageResources"],
     rendererOrigin,
-  } as RuntimeConfig, signal, options, nativeSocket);
+  } as RuntimeConfig, signal, options, nativeSocket as string);
 }
 
 export async function closePackagedRendererForTest(server: Server): Promise<void> {
@@ -1199,6 +1220,12 @@ async function serveCapturePermissionRequest(
       respondJson(response, 405, { error: "capture permission status accepts GET only" }, noStoreHeaders);
       return;
     }
+    // linux-port: PipeWire/PulseAudio session capture has no TCC-style gate
+    // and no native transcription socket; report granted before touching one.
+    if (process.platform === "linux") {
+      respondJson(response, 200, { microphone: "granted", systemAudio: "granted" }, noStoreHeaders);
+      return;
+    }
     if (!boundary.nativeSocket) {
       respondJson(response, 503, { error: "capture permission boundary unavailable" }, noStoreHeaders);
       return;
@@ -1232,6 +1259,11 @@ async function serveCapturePermissionRequest(
   const token = singleHeader(request, capturePermissionIntentHeader);
   if (!token || !consumeFreshIntent(boundary, token)) {
     respondJson(response, 409, { error: "fresh one-use permission intent required" }, noStoreHeaders);
+    return;
+  }
+  // linux-port: see the status branch above.
+  if (process.platform === "linux") {
+    respondJson(response, 200, { microphone: "granted", systemAudio: "granted" }, noStoreHeaders);
     return;
   }
   if (!boundary.nativeSocket) {
