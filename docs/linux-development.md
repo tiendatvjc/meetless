@@ -90,6 +90,12 @@ Mở http://localhost:8082 (daemon chạy tại 127.0.0.1:8081).
   `127.0.0.1:18081` trong 4.1s (module error supervisor-entrypoint đã hết);
   cả 5 stage `ok:true`, exit 0. Manifest:
   `.artifacts/linux-proof/manifest-20260913T121515.json`.
+- 2026-09-13, desktop dev smoke (có display, `MEETLESS_RUNTIME_ROOT=/tmp/... timeout 25
+  npm run runtime:desktop`): fail-closed ngay tại host attestation trước khi spawn
+  electron — "Production Meetless host attestation failed closed: cannot attest the
+  installed host: ENOENT ... realpath '/Applications/Meetless.app'", exit 1 sau ~2s.
+  Hợp đồng spawn dev đã được khoá bởi `packages/runtime/test/linux-desktop-spawn.test.ts`;
+  nhánh dev host-attestation cho linux là việc của task sau.
 
 ## Khác biệt so với macOS
 
