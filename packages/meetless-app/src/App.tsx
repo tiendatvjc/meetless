@@ -1120,7 +1120,9 @@ export function AppContent({ mode }: { mode: "desktop" | "companion" }) {
       /> : null}
       <MeetingListSurface
         layoutTier={layoutTier}
-        canRecord={mode === "desktop"}
+        // linux-port: the browser companion is the primary recording surface
+        // (no MeetlessHost window); recording still runs daemon-side.
+        canRecord={mode === "desktop" || mode === "companion"}
         connectionLabel={status}
         hostConnectionStatus={hostConnectionStatus}
         error={error}

@@ -40,3 +40,5 @@ Branch `linux-port` (fork tiendatvjc/meetless), completed 2026-09-13. Spec: ../s
 - Runtime daemon **ghi đè `paseo-home/config.json` mỗi lần khởi động** theo template riêng: bỏ `daemon.auth.password` và các origin CORS thêm tay (chỉ giữ origin renderer `127.0.0.1:8082`). Hệ quả: đặt mật khẩu/localhost-origin qua config file không bền. Cần sửa code (đưa auth + extra origins vào template của runtime, hoặc qua env) trước khi quảng cáo các tính năng đó.
 - `runtime:desktop` (khi thất bại lẫn khi chạy) cũng ghi config này — đã ghi ở mục trên.
 - Companion phải mở bằng `http://127.0.0.1:8082` (localhost bị daemon từ chối origin cho tới khi follow-up trên land).
+
+- Web companion không có nút ghi: `canRecord={mode === "desktop"}` (App.tsx) — product boundary macOS. Đã đổi cho fork: companion cũng được ghi (linux-port: browser = primary surface; recording vẫn chạy daemon-side). Divergence so với docs/product/platforms.md "companions do not record" đã ghi ở đây.
