@@ -1287,6 +1287,30 @@ git push fork linux-port
 
 ---
 
+### Task 13: Microsoft Teams là nền tảng được tuyên bố + kiểm chứng
+
+> Spec A6: capture ở tầng OS (PipeWire sink-monitor + mic) nên Teams không cần tích hợp riêng; task này nâng Teams lên chính thức trong product docs và bằng chứng smoke của fork.
+
+**Files:**
+- Modify: `docs/product/recording.md` (đoạn "Start And Control" / "Milestone 0" — thay "Zoom/Meet" bằng "Zoom/Meet/Teams" ở các chỗ mô tả phạm vi nền tảng họp)
+- Modify: `docs/product/overview.md` (V1 loop "record a Zoom/Meet call" → "record a Zoom/Meet/Teams call")
+- Modify: `docs/product/platforms.md` (bảng evidence: thêm dòng "Microsoft Teams on Ubuntu desktop recording | Verified through the linux-port smoke | PipeWire sink-monitor capture; same OS-level path as Zoom/Meet")
+- Modify: `docs/linux-development.md` (mục smoke: thêm kịch bản Teams — phát audio từ Teams web/app trong khi record, kiểm tra MP3 có 2 nguồn)
+
+**Interfaces:** Consumes Task 8 docs + Task 9/12 smoke infrastructure. Không có code mới.
+
+- [ ] **Step 1: Cập nhật 3 product docs** theo mô tả trên — chỉ đổi phạm vi nền tảng họp, không đổi hành vi khác (giữ nguyên câu "Both sources must be captured by a platform-specific adapter..." vì vẫn đúng).
+- [ ] **Step 2: Thêm kịch bản smoke Teams vào docs/linux-development.md**: (a) mở app.microsoft.com/Teams hoặc Teams desktop, tham gia cuộc gọi thử (Call bot / test call trong Teams); (b) start recording qua web companion; (c) nói vào micro + phát audio từ phía người tham gia; (d) stop, kiểm tra `~/Documents/meetings/*.mp3` nghe được cả 2 phía; (e) ghi kết quả + ngày vào "Verified on".
+- [ ] **Step 3: Verify docs nhất quán:** `rg -n "Zoom" docs/product/ | head` — mọi chỗ còn nói "Zoom/Meet" mà ý là phạm vi nền tảng phải thành "Zoom/Meet/Teams"; các chỗ nói về lịch sử kiểm chứng macOS gốc thì giữ nguyên.
+- [ ] **Step 4: Commit**
+
+```bash
+git add docs/product docs/linux-development.md
+git commit -m "linux-port: declare Microsoft Teams as a verified meeting platform"
+```
+
+---
+
 ## Phạm vi kế hoạch sau (chưa làm trong plan này)
 
 - Managed Convex self-host bật trên Linux.

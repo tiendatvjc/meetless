@@ -10,6 +10,8 @@ Chạy được vòng lặp sản phẩm V1 đầy đủ của Meetless trên Ub
 
 ```
 ghi âm cuộc họp (micro + system audio qua PipeWire)
+  — nền tảng họp: Zoom, Google Meet, Microsoft Teams, và bất kỳ app nào
+    phát audio qua sink mặc định (capture ở tầng OS, không tích hợp API từng app)
   → chunk WAV kháng crash
   → ffmpeg finalize MP3 + WAV vào ~/Documents/meetings
   → transcript BYOK (OpenAI gpt-transcribe, key của người dùng)
@@ -26,6 +28,7 @@ ghi âm cuộc họp (micro + system audio qua PipeWire)
 | A3 | Premium/RevenueCat trên Linux = **no-op "inactive"**; managed route từ chối với thông báo rõ; BYOK không bị gate | Không phá chính sách sản phẩm, không xóa code macOS | Có |
 | A4 | Submodule paseo pin `ee3420e` (tag `meetless-v1-base-2026-08-16`) thay vì gitlink `a2c8ff34` | `a2c8ff34` đã bị force-push mất, không fetch được từ bất kỳ nhánh nào của `hoangnb24/paseo`; `ee3420e` là base được `docs/paseo-p0-inventory.md` tuyên bố | Thỏa thuận lại với upstream nếu commit cũ quay lại |
 | A5 | Cả hai repo fork về `tiendatvjc` (đã tạo) | Làm fork tự chủ, submodule trỏ về paseo fork của mình | Có |
+| A6 | **Microsoft Teams là nền tảng được kiểm chứng chính thức** (chủ sở hữu yêu cầu 2026-09-13). Capture tầng OS nên Teams (desktop PWA/web) không cần tích hợp riêng; công việc = cập nhật product docs (recording.md, overview.md, platforms.md) nêu Zoom/Meet/Teams + kịch bản smoke Teams trong bằng chứng | Replay cùng cơ chế sink-monitor; không có code phân biệt app họp | Đã chốt |
 
 ## 3. Dữ kiện đã kiểm chứng trong code (neo cho kế hoạch)
 
