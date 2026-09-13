@@ -136,13 +136,27 @@ function skipped(stage, reason) {
 }
 
 /**
- * Stage 0: dev-mode daemon probe. Attempts `cli.js daemon` against a tmp
- * runtime root and waits up to 8s for the TCP listener. Either outcome is
- * evidence; a non-listening daemon is reported as ok:false with its first
- * error line, not as proof failure.
+ * Stage 0: dev-mode daemon probe with plugin-health assertion (final-review
+ * Issue 5). Spawns `cli.js daemon` against a tmp runtime root carrying a
+ * fixture BYOK key (the linux dev transcription contract), waits up to 15s for
+ * the TCP listener, then asserts recording-runtime readiness through the
+ * production surface (`waitForRecordingRuntime`): daemon plugin catalog shows
+ * the meetless plugin running, `runtime.readiness.bootstrap` correlates a
+ * nonce, and the authoritative recording-socket status answers with the
+ * runtime/instance/capture fields present. Either outcome is evidence; the
+ * failure is reported truthfully with its first error line, not as proof
+ * failure (this stage stays evidence-only like the desktop stage).
  */
 async function probeDaemon() {
   const runtimeRoot = await mkdtempTmp("meetless-proof-daemon-");
+  // Linux-port Issue 1c: recording bootstrap on linux dev requires a
+  // configured BYOK key when no signed native socket exists. Fixture key
+  // only; the real fetch is never exercised by the daemon.
+  await writeFile(
+    path.join(runtimeRoot, "byok-openai.json"),
+    `${JSON.stringify({ version: 1, apiKey: BYOK_FIXTURE_KEY })}\n`,
+    "utf8",
+  );
   const outputLines = [];
   const child = spawn(process.execPath, [runtimeCli, "daemon"], {
     cwd: repoRoot,
@@ -160,14 +174,25 @@ async function probeDaemon() {
   child.stderr.on("data", capture);
 
   let listening = false;
+  let pluginHealth = null;
+  let pluginHealthError = null;
   let stopResult = null;
   try {
-    listening = await waitForTcp(DAEMON_PORT, 8_000);
+    listening = await waitForTcp(DAEMON_PORT, 15_000);
+    if (listening) {
+      try {
+        pluginHealth = await assertDaemonPluginHealth(runtimeRoot);
+      } catch (error) {
+        pluginHealthError = error instanceof Error ? error.message : String(error);
+      }
+    }
   } finally {
     stopResult = await stopChild(child);
     stageDetails.daemon = {
       listen: DAEMON_LISTEN,
       listened: listening,
+      pluginHealth,
+      pluginHealthError,
       stopped: stopResult.exited,
       exit: stopResult.result,
       output: outputLines,
@@ -175,11 +200,46 @@ async function probeDaemon() {
     await rmTmp(runtimeRoot);
   }
 
-  if (listening) return { artifact: DAEMON_LISTEN, detail: { listened: true, outputLines: outputLines.length } };
-  const firstError = outputLines.find((line) => /error|cannot|denied|throw|exception|not found/iu.test(line))
+  if (listening && pluginHealth) {
+    return {
+      artifact: DAEMON_LISTEN,
+      detail: { listened: true, pluginHealth, outputLines: outputLines.length },
+    };
+  }
+  const firstError = pluginHealthError
+    ?? outputLines.find((line) => /error|cannot|denied|throw|exception|not found/iu.test(line))
     ?? outputLines[0]
-    ?? "daemon never accepted TCP within 8s and produced no output";
+    ?? "daemon never accepted TCP within 15s and produced no output";
   throw new Error(firstError.slice(0, 300));
+}
+
+/**
+ * Plugin-health assertion through the production readiness surface: resolves
+ * the same RuntimeConfig the launcher would, then requires the full
+ * daemon-catalog -> plugin-bootstrap -> authoritative recording-status chain
+ * to attest a live recording runtime.
+ */
+async function assertDaemonPluginHealth(runtimeRoot) {
+  const { resolveRuntimeConfig } = await import(path.join(repoRoot, "packages/runtime/dist/config.js"));
+  const { waitForRecordingRuntime } = await import(path.join(repoRoot, "packages/runtime/dist/readiness.js"));
+  const config = resolveRuntimeConfig({ runtimeRoot, listen: DAEMON_LISTEN });
+  const recorder = await waitForRecordingRuntime(config, { timeoutMs: 30_000 });
+  const runtime = recorder.runtime;
+  if (!runtime.instanceId || !runtime.startedAt || !Number.isInteger(runtime.pluginPid)) {
+    throw new Error("recording readiness attestation is missing instance/startedAt/pluginPid fields");
+  }
+  if (recorder.daemonPlugin.pluginId !== "meetless" || recorder.daemonPlugin.status !== "running") {
+    throw new Error(`daemon plugin attestation is ${recorder.daemonPlugin.pluginId}/${recorder.daemonPlugin.status}`);
+  }
+  return {
+    pluginId: recorder.daemonPlugin.pluginId,
+    pluginRunning: true,
+    runtimeInstanceId: runtime.instanceId,
+    pluginPid: runtime.pluginPid,
+    captureMode: runtime.capture.mode,
+    sessionStatus: recorder.status.status,
+    helperConfiguredPath: runtime.capture.executable.configuredPath,
+  };
 }
 
 /**

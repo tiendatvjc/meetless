@@ -131,7 +131,7 @@ Các bước smoke:
   `waitForRecordingRuntime` (pluginId meetless/running, captureMode
   production, sessionStatus idle); cả 6 stage `ok:true`, exit 0; stage desktop
   lần đầu đạt renderer HTTP 200 (`http://127.0.0.1:18086`, 3.6s) — electron
-  binarydev fail "Electron failed to install correctly" là lỗi môi trường
+  dev fail "Electron failed to install correctly" là lỗi môi trường
   node_modules/electron sau khi renderer đã trả 200. Manifest:
   `.artifacts/linux-proof/manifest-20260913T134752.json`.
 
