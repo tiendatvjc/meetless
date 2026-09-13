@@ -83,6 +83,25 @@ npm run runtime:web
 
 Mở http://localhost:8082 (daemon chạy tại 127.0.0.1:8081).
 
+## Kiểm chứng Microsoft Teams
+
+Capture là ở tầng OS (PipeWire mic + sink-monitor) nên Teams không cần tích hợp
+riêng cho từng app — kịch bản kiểm chứng giống Zoom/Meet.
+
+Trạng thái: (chưa thực hiện trên máy này — cần pipewire-audio-utils). Sau khi
+chạy thử, ghi kết quả + ngày vào mục "Verified on" bên dưới; trước đó không
+khai báo đã kiểm chứng.
+
+Các bước smoke:
+
+1. Mở Teams (web hoặc desktop app) và tham gia cuộc gọi thử (Call bot / test
+   call trong Teams).
+2. Start recording qua web companion (http://localhost:8082).
+3. Nói vào micro và phát audio từ phía người tham gia xa trong lúc ghi.
+4. Stop recording rồi kiểm tra `~/Documents/meetings/*.mp3`: phải nghe được cả
+   hai phía (mic local + remote system audio).
+5. Ghi kết quả + ngày vào mục "Verified on" (kèm lỗi/manifest nếu fail).
+
 ## Verified on
 
 - 2026-09-13, Ubuntu 26.04.1, Node v24.16.0: `npm run proof:linux` (sau khi đổi

@@ -53,6 +53,7 @@ routing, and quota policy.
 Transcription produces ordered segments, each with a stable ID and millisecond
 audio range. Transcription failure is retryable from saved audio.
 
-Milestone 0 proves only that a real or controlled Zoom/Meet call can capture the
-local microphone and remote system-audio sides. Recovery, MP3 finalization, and
-transcription are later milestones and are not implied by that spike.
+Milestone 0 proves only that a real or controlled Zoom/Meet/Teams call can
+capture the local microphone and remote system-audio sides. Recovery, MP3
+finalization, and transcription are later milestones and are not implied by
+that spike.

@@ -7,7 +7,7 @@ coding agent such as Codex to ask questions about the result.
 The V1 loop is:
 
 ```text
-record a Zoom/Meet call
+record a Zoom/Meet/Teams call
   -> preserve and export local audio
   -> transcribe into timed segments
   -> select a meeting and read its complete transcript
