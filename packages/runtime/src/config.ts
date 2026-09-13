@@ -34,8 +34,21 @@ import {
 export const PINNED_PASEO_COMMIT = "a2c8ff349ffdf6f500eb09270c7f44af4c018bfc";
 export const DEFAULT_MEETLESS_LISTEN = "127.0.0.1:6777";
 export const MEETLESS_INSTALLATION_PATH = "/Applications/Meetless.app";
-export const MEETLESS_USER_SUPPORT_RELATIVE_PATH = "Library/Application Support/Meetless";
-export const MEETLESS_RECORDING_EXPORTS_RELATIVE_PATH = "Documents/meetings";
+
+export function platformUserSupportRelativePath(platform: NodeJS.Platform): string {
+  if (platform === "darwin") return "Library/Application Support/Meetless";
+  if (platform === "linux") return ".local/share/meetless";
+  throw new Error(`unsupported platform: ${platform}`);
+}
+
+export function platformRecordingExportsRelativePath(platform: NodeJS.Platform): string {
+  if (platform === "darwin" || platform === "linux") return "Documents/meetings";
+  throw new Error(`unsupported platform: ${platform}`);
+}
+
+/** Kept for the packaged macOS runtime; Linux resolves through the functions above. */
+export const MEETLESS_USER_SUPPORT_RELATIVE_PATH = platformUserSupportRelativePath("darwin");
+export const MEETLESS_RECORDING_EXPORTS_RELATIVE_PATH = platformRecordingExportsRelativePath("darwin");
 export const PACKAGED_RENDERER_ORIGIN = "http://127.0.0.1:18082";
 const packageDirectory = path.dirname(fileURLToPath(import.meta.url));
 export const REPOSITORY_ROOT = path.resolve(packageDirectory, "../../..");
