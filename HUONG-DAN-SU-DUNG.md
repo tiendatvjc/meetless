@@ -112,6 +112,13 @@ cd /home/dat/Applications/meetless && npm run runtime:web
 ```
 → mở trình duyệt tại **http://127.0.0.1:8082**. Để dừng: nhấn `Ctrl+C` trong Terminal.
 
+### Thẻ "Meetless Premium" trên màn hình — bỏ qua
+
+Đó là giao diện monetization của bản macOS (đăng ký RevenueCat để dùng transcription
+do Meetless quản lý). Trên Linux nó **không hoạt động và không cần**: trạng thái luôn
+"chưa kích hoạt", nút Purchase sẽ báo lỗi nếu bấm. Transcribe trên bản port dùng
+**key OpenAI của chính bạn** (BYOK — mục 4) — không liên quan thẻ này.
+
 ### Ghi âm một cuộc họp
 
 1. Bật daemon (mục trên) + mở giao diện web.
