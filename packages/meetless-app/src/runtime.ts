@@ -24,7 +24,8 @@ export function resolveAppMode(): MeetlessAppMode {
 
 export function supportsDesktopRecording(): boolean {
   return Platform.OS === "web" && typeof window !== "undefined" &&
-    window.paseoDesktop?.platform === "darwin" && typeof window.paseoDesktop.invoke === "function";
+    (window.paseoDesktop?.platform === "darwin" || window.paseoDesktop?.platform === "linux") &&
+    typeof window.paseoDesktop.invoke === "function";
 }
 
 export function resolveDaemonUrl(input: {
