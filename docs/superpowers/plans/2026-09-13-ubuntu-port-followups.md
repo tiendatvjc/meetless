@@ -1,0 +1,32 @@
+# Ubuntu Port — Follow-ups & Rulings Record
+
+Branch `linux-port` (fork tiendatvjc/meetless), completed 2026-09-13. Spec: ../specs/2026-09-13-ubuntu-port-design.md. Plan: 2026-09-13-ubuntu-port.md.
+
+## Controller rulings (những quyết định agent đã thay chủ sở hữu)
+
+1. Submodule paseo pin `ee3420e` (base được docs tuyên bố) thay gitlink `a2c8ff34` (bị force-push mất, không fetch được). Pin cập nhật trong PINNED_PASEO_COMMIT + paseo-dependency.mjs.
+2. Plan Task 1 lỗi nhất quán nội (regex test vs message) → chuẩn hóa "unsupported platform: ...".
+3. parseProcCmdline giữ argv rỗng giữa chừng (khớp hợp đồng darwin), bỏ NUL cuối.
+4. Task 5 storage-contract adapter: helper linux tự rename chunk theo validator (chunk--<source>--<seq>--<startFrame>--<frames>--16000--1.wav) + viết lại id/logicalStartMs/durationMs bằng công thức của validator.
+5. host.test.ts "production CLI fails closed..." là hợp đồng darwin → darwin-conditional; linux counterpart trong linux-desktop-attestation.test.ts.
+6. Linux dev-mode bypass attestation (host.ts + production-host.ts): chỉ linux + unpackaged + defaultDependencies; sở hữu qua /proc ppid; darwin byte-identical.
+7. Capture helper linux = wrapper executable materialize trong runtime root (readiness pin helperPath + cấm args production → execPath+[entry] không thể pass).
+8. Installer --install chạy repo checkout (dev-mode-from-repo) thay dist staged (thiếu node_modules); staging chỉ là dry-run preview.
+9. Deb/AppImage maintainer = fork identity (tiendatvjc, repo URL).
+10. Metadata repackage folded vào fix packaging; client.test.ts 1F = pre-existing ở base.
+
+## Follow-ups (đều fail-closed, không chặn dùng dev-mode)
+
+- Live-recording helper inspection: /proc argv identity sẽ fail khi helperPid≠null (readiness.ts:705-739) — cần nhánh node-argv cho linux.
+- Same-uid /proc check best-effort khi status không đọc được (production-host.ts:479-481).
+- Packaged (AppImage) depth: plugin nằm trong asar → path-spawn sẽ fail; cần asarUnpack packages/meetless-plugin hoặc bundle; native node-pty/sherpa chưa stage; AppImage cần MEETLESS_RUNTIME_ROOT/PASEO_ELECTRON_USER_DATA_DIR từ ngoài (chưa có host env contract).
+- paseo web app export chưa build được trên máy này (renderer content của cửa sổ desktop còn lỗi paseo://app/).
+- systemd unit template: render-anchor text cũ (guard an toàn, cần dọn chữ).
+- Append threshold 960KB chưa được e2e exercised; dettached-loop catch; writer commit-failure requeue; minor items khác — xem ledger trong .superpowers (đã xóa sau khi commit file này).
+
+## Bằng chứng chính (đã verify)
+
+- Proof `npm run proof:linux`: record→finalize(ffmpeg thật, ffprobe)→transcribe(BYOK)→MCP(HTTP thật)→daemon(listen + waitForRecordingRuntime + plugin running)→desktop — tất cả stage ok.
+- systemd service ACTIVE + listened live qua host:linux:apply.
+- AppImage 117MB/deb 92MB: extract + dpkg-deb + launch không crash import, window tạo được.
+- Regression: runtime/plugin suites không có file fail mới so baseline môi trường; tsc sạch.
