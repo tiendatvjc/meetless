@@ -10,4 +10,8 @@ describe("parseProcCmdline", () => {
   it("returns an empty vector for an empty buffer", () => {
     expect(parseProcCmdline(Buffer.alloc(0))).toEqual([]);
   });
+
+  it("preserves mid-argv empty entries as consecutive NULs", () => {
+    expect(parseProcCmdline(Buffer.from("node\0\0daemon\0", "utf8"))).toEqual(["node", "", "daemon"]);
+  });
 });

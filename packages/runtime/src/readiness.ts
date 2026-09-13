@@ -913,7 +913,13 @@ const defaultLiveProcessInspection: LiveProcessInspection = {
 };
 
 export function parseProcCmdline(buffer: Buffer): string[] {
-  return buffer.toString("utf8").split("\0").filter((entry) => entry.length > 0);
+  const entries = buffer.toString("utf8").split("\0");
+  // The trailing NUL after the last argument yields a final empty entry; drop
+  // trailing empties only so mid-argv empty arguments survive as consecutive NULs.
+  while (entries.length > 0 && entries[entries.length - 1] === "") {
+    entries.pop();
+  }
+  return entries;
 }
 
 async function readLinuxProcessArgv(pid: number): Promise<string[]> {
