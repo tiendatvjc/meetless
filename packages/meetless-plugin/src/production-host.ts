@@ -363,6 +363,9 @@ type HostIdentity = z.infer<typeof HostIdentitySchema>;
 
 export async function assertCapturePermissionsReady(environment: NodeJS.ProcessEnv = process.env): Promise<void> {
   if (environment.MEETLESS_CAPTURE_MODE === "fixture") return;
+  // linux-port: PipeWire/PulseAudio session capture has no TCC-style native
+  // permission gate and no transcription socket to ask; skip the native check.
+  if (process.platform === "linux") return;
   let socketPath: string;
   try {
     socketPath = runtimeEndpoint(environment, "transcription").bindArgument;

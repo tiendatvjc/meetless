@@ -130,7 +130,15 @@ export class CaptureHelper {
 
   private childEnvironment(registrationToken: string | null): NodeJS.ProcessEnv {
     const path = process.env.PATH;
-    if (!this.options.registerProcess) return path ? { PATH: path } : {};
+    if (!this.options.registerProcess) {
+      const devEnvironment: NodeJS.ProcessEnv = path ? { PATH: path } : {};
+      // linux-port: parec/pactl reach the PulseAudio-over-PipeWire socket
+      // through XDG_RUNTIME_DIR; without it they fail with "Connection refused".
+      if (process.platform === "linux" && process.env.XDG_RUNTIME_DIR) {
+        devEnvironment.XDG_RUNTIME_DIR = process.env.XDG_RUNTIME_DIR;
+      }
+      return devEnvironment;
+    }
     const required = [
       "MEETLESS_RUNTIME_PACKAGED",
       "MEETLESS_RUNTIME_ROOT",
