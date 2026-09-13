@@ -16,3 +16,4 @@ native/**/.build/
 *.tsbuildinfo
 
 .env.local
+.superpowers/
