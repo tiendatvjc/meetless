@@ -1,0 +1,37 @@
+# electron-builder config for the Meetless Linux desktop package (linux-port).
+#
+# Run by scripts/package-linux.mjs as:
+#   electron-builder --projectDir .artifacts/linux-package/app \
+#     --config <repo>/scripts/linux/electron-builder.meetless.yml --linux AppImage deb
+#
+# All relative paths resolve against the staging project dir
+# (<repo>/.artifacts/linux-package/app), which contains:
+#   runtime/   esbuild single-file bundle of packages/runtime/dist/cli.js
+#   plugin/    packages/meetless-plugin/dist + bundled linux capture helper entry
+#   renderer/  packages/meetless-app/dist (expo static web export)
+#   scripts/electron-bootstrap.mjs and scripts/linux/icon.png
+appId: com.meetless.app
+productName: Meetless
+executableName: Meetless
+directories:
+  # <staging>/../../.. = repo root
+  output: ../../../release/linux
+files:
+  - runtime/**/*
+  - plugin/**/*
+  - renderer/**/*
+  - scripts/electron-bootstrap.mjs
+asarUnpack:
+  - runtime/**
+extraResources: []
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Utility
+  maintainer: Meetless <dev@meetless.app>
+  icon: scripts/linux/icon.png
+appImage:
+  artifactName: meetless-${version}-${arch}.AppImage
+deb:
+  artifactName: meetless_${version}_${arch}.deb
