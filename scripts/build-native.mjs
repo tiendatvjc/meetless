@@ -6,6 +6,25 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const execFileAsync = promisify(execFile);
+
+// Linux branch first: the linux port has no Swift native targets. Verify the
+// capture prerequisites (ffmpeg, and parec/pactl from pipewire-audio-utils)
+// and stop here; everything below is the macOS (darwin) path.
+if (process.platform === "linux") {
+  for (const tool of ["ffmpeg", "parec", "pactl"]) {
+    try {
+      await execFileAsync("which", [tool]);
+    } catch {
+      console.error(
+        `Thiếu ${tool}. Cài: sudo apt install ${tool === "ffmpeg" ? "ffmpeg" : "pipewire-audio-utils"}`,
+      );
+      process.exit(1);
+    }
+  }
+  console.log("linux native prerequisites present (ffmpeg, parec, pactl)");
+  process.exit(0);
+}
+
 const environment = {
   ...process.env,
   SWIFTPM_MODULECACHE_OVERRIDE: "/private/tmp/meetless-swift-module-cache",

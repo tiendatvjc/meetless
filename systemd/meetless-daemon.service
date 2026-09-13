@@ -1,0 +1,13 @@
+[Unit]
+Description=Meetless meeting recorder daemon (linux-port)
+
+[Service]
+Type=simple
+Environment=MEETLESS_RUNTIME_ROOT=%h/.local/share/meetless
+Environment=MEETLESS_LISTEN=127.0.0.1:8081
+ExecStart=/usr/bin/env node %h/.local/share/meetless/runtime/cli.js daemon
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
