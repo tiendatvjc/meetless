@@ -30,3 +30,7 @@ Branch `linux-port` (fork tiendatvjc/meetless), completed 2026-09-13. Spec: ../s
 - systemd service ACTIVE + listened live qua host:linux:apply.
 - AppImage 117MB/deb 92MB: extract + dpkg-deb + launch không crash import, window tạo được.
 - Regression: runtime/plugin suites không có file fail mới so baseline môi trường; tsc sạch.
+
+## Sửa sai sót sau bàn giao (2026-09-13)
+
+- Tên gói apt trong hướng dẫn bị sai: không tồn tại `pipewire-audio-utils` trên Ubuntu. `parec`/`pactl` nằm trong `pulseaudio-utils`; cần thêm `pipewire-pulse` (lớp Pulse-over-PipeWire) nếu máy chưa có. Đã sửa build-native.mjs, install-linux-host.mjs, linux-development.md, platforms.md.

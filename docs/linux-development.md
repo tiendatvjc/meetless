@@ -10,10 +10,12 @@ Hướng dẫn ngắn cho nhánh `linux-port` trên Ubuntu. Thiết kế đầy 
 - Công cụ capture/audio:
 
 ```bash
-sudo apt install ffmpeg pipewire-audio-utils
+sudo apt install ffmpeg pulseaudio-utils pipewire-pulse
 ```
 
-(`parec` và `pactl` nằm trong gói `pipewire-audio-utils`.)
+(`parec` và `pactl` nằm trong gói `pulseaudio-utils`; `pipewire-pulse` là lớp
+cho các công cụ PulseAudio nói chuyện với PipeWire. Lưu ý: **không** có gói
+`pipewire-audio-utils` trên Ubuntu.)
 
 `npm run build:native` trên Linux chỉ kiểm tra `ffmpeg`/`parec`/`pactl` có trong PATH
 (không build Swift). Thiếu công cụ nào thì nó in lệnh apt tương ứng và exit 1.
@@ -106,7 +108,7 @@ Mở http://localhost:8082 (daemon chạy tại 127.0.0.1:8081).
 Capture là ở tầng OS (PipeWire mic + sink-monitor) nên Teams không cần tích hợp
 riêng cho từng app — kịch bản kiểm chứng giống Zoom/Meet.
 
-Trạng thái: (chưa thực hiện trên máy này — cần pipewire-audio-utils). Sau khi
+Trạng thái: (chưa thực hiện trên máy này — cần pulseaudio-utils + pipewire-pulse). Sau khi
 chạy thử, ghi kết quả + ngày vào mục "Verified on" bên dưới; trước đó không
 khai báo đã kiểm chứng.
 

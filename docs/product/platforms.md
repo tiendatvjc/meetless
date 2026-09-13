@@ -10,7 +10,7 @@ proof.
 | macOS Intel and macOS 15–25 | Unverified | API availability is not real-device proof. Do not advertise support before target validation. |
 | Windows desktop recording | Unsupported in first V1 matrix | No both-side Zoom/Meet artifact. |
 | Linux desktop recording | Unsupported in first V1 matrix | No both-side Zoom/Meet artifact. |
-| Microsoft Teams on Ubuntu desktop recording | In V1 companion scope via linux-port; capture path identical to Zoom/Meet | OS-level PipeWire capture (mic + sink monitor); no per-app integration; smoke procedure documented in docs/linux-development.md, not yet executed (needs pipewire-audio-utils). |
+| Microsoft Teams on Ubuntu desktop recording | In V1 companion scope via linux-port; capture path identical to Zoom/Meet | OS-level PipeWire capture (mic + sink monitor); no per-app integration; smoke procedure documented in docs/linux-development.md, not yet executed (needs pulseaudio-utils + pipewire-pulse). |
 | Web/mobile companion clients | In V1 companion scope | Browse, ask, and play while the host is reachable through direct LAN pairing or Paseo's encrypted relay; when offline, show the host-offline state without replacing known meetings with a false empty state; no offline detail-access requirement and no V1 system-audio recording. |
 
 The first supported recording OS is macOS, with the V1 claim currently bounded

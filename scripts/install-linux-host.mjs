@@ -157,7 +157,7 @@ async function reportPrerequisites() {
       () => true,
       () => false,
     );
-    const aptPackage = tool === "ffmpeg" ? "ffmpeg" : "pipewire-audio-utils";
+    const aptPackage = tool === "ffmpeg" ? "ffmpeg" : "pulseaudio-utils pipewire-pulse";
     console.log(
       `  ${tool}: ${present ? "có" : `THIẾU — cài: sudo apt install ${aptPackage}`}`,
     );
