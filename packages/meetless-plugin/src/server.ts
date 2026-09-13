@@ -54,8 +54,9 @@ import {
   FileManagedConvexUploadJournal,
   type ManagedConvexCredential,
 } from "./managed-upload.js";
-import { TranscriptionRouteCoordinator, type TranscriptionByokRoute } from "./transcription-route.js";
+import { TranscriptionRouteCoordinator, type TranscriptionByokRoute, type TranscriptionPremiumAccess } from "./transcription-route.js";
 import { OpenAiByokTranscriptionProvider } from "./openai-byok-provider.js";
+import { LinuxNoopPremiumAccess } from "./linux-premium-access.js";
 
 let store: MeetingStore | null = null;
 let recordingService: RecordingService | null = null;
@@ -344,7 +345,7 @@ export function getTranscriptionRoute(): TranscriptionRouteCoordinator {
   if (transcriptionRoute) return transcriptionRoute;
   transcriptionRoute = new TranscriptionRouteCoordinator(
     getMeetingStore(),
-    getPremiumService(),
+    linuxTranscriptionPremiumAccess(),
     {
       resumeExisting: (recordingId) => resumeExistingManagedRecording(recordingId),
       transcribe: (input) => transcribeManagedRecording({
@@ -355,6 +356,16 @@ export function getTranscriptionRoute(): TranscriptionRouteCoordinator {
     linuxByokTranscriptionRoute(),
   );
   return transcriptionRoute;
+}
+
+/**
+ * Linux has no RevenueCat SDK, so Premium is permanently inactive for the
+ * transcription route there; BYOK remains the only free local route
+ * (docs/product/monetization.md). Other platforms keep the native-backed
+ * PremiumService gate unchanged.
+ */
+function linuxTranscriptionPremiumAccess(): TranscriptionPremiumAccess {
+  return process.platform === "linux" ? new LinuxNoopPremiumAccess() : getPremiumService();
 }
 
 /**
