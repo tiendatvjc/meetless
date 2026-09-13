@@ -72,6 +72,10 @@ export async function assertProductionHostProvenance(
     return;
   }
   if (environment.MEETLESS_CAPTURE_MODE === "fixture") return;
+  if (isLinuxDevelopmentProvenanceEnvironment(dependencies)) {
+    await assertLinuxDevelopmentProcessOwnership(pluginPid);
+    return;
+  }
   const hostPid = Number(environment.MEETLESS_HOST_PID);
   const bundlePath = environment.MEETLESS_HOST_BUNDLE_PATH?.trim();
   const identityPath = environment.MEETLESS_HOST_IDENTITY_PATH?.trim();
@@ -407,6 +411,90 @@ function isAncestor(candidatePid: number, ancestorPid: number, parentPid: (pid: 
   }
   return false;
 }
+
+/**
+ * Linux development launch (linux-port, mirroring the runtime-side bypass in
+ * packages/runtime/src/host.ts commit b89aefa): the production plugin
+ * provenance stack — MEETLESS_HOST_* env, lsof executable identity, and
+ * codesign inspection — is provided only by the macOS MeetlessHost. An
+ * unpackaged linux launch instead proves process ownership through /proc: the
+ * plugin process must have a live, same-user parent (the spawning
+ * daemon/supervisor such as the systemd user service, the desktop runtime, or
+ * an interactive shell). The bypass is narrower than the platform: packaged
+ * runs keep the native packaged attestation path, fixture mode stays exempt,
+ * and injected inspection dependencies (the darwin provenance contract tests)
+ * always keep the full darwin behavior.
+ */
+function isLinuxDevelopmentProvenanceEnvironment(dependencies: ProductionHostDependencies): boolean {
+  return process.platform === "linux" && dependencies === defaultDependencies;
+}
+
+/**
+ * Linux dev ownership proof: `/proc/<pid>/stat` field 4 (ppid) of the plugin
+ * process, then the parent itself must be inspectable, alive, and owned by the
+ * same user. A plugin reparented to init (ppid <= 1) or supervised by a
+ * zombie/foreign process is unowned and fails closed. Residual, documented:
+ * /proc ppid alone cannot distinguish a live subreaper's adoption from real
+ * supervision; the runtime-side b89aefa bypass pins `process.pid` because the
+ * desktop runtime is the in-process spawner, while the plugin runs inside the
+ * daemon it would attest. The darwin inspector stack (`ps`/`lsof`/`codesign`)
+ * is deliberately not used so the dev proof stays independent of the macOS
+ * production tooling.
+ */
+async function assertLinuxDevelopmentProcessOwnership(pluginPid: number): Promise<void> {
+  const parentPid = await linuxProcStatParentPid(pluginPid);
+  if (!Number.isInteger(parentPid) || parentPid <= 1) {
+    throw hostFailure(
+      `linux dev plugin PID ${pluginPid} has no owning supervisor process (parent PID ${parentPid})`,
+    );
+  }
+  const parent = await inspectLinuxProcProcess(parentPid);
+  if (parent.state === "Z") {
+    throw hostFailure(`linux dev supervisor PID ${parentPid} has exited and no longer owns plugin PID ${pluginPid}`);
+  }
+  const ownUid = typeof process.getuid === "function" ? process.getuid() : null;
+  if (parent.uid !== null && ownUid !== null && parent.uid !== ownUid) {
+    throw hostFailure(`linux dev supervisor PID ${parentPid} is owned by another user (uid ${parent.uid})`);
+  }
+}
+
+/** `/proc/<pid>/stat` field 4 (ppid); comm may contain spaces, so parse after the last ')'. */
+async function linuxProcStatParentPid(pid: number): Promise<number> {
+  let stat: string;
+  try {
+    stat = await readFile(`/proc/${pid}/stat`, "utf8");
+  } catch (error) {
+    throw hostFailure(`cannot inspect linux dev plugin PID ${pid} through /proc: ${describe(error)}`);
+  }
+  return parseLinuxProcStatParentPid(stat, pid);
+}
+
+export function parseLinuxProcStatParentPid(stat: string, pid: number): number {
+  const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  const ppid = Number(fields[1]);
+  if (!Number.isInteger(ppid)) {
+    throw hostFailure(`cannot read the parent PID of linux dev plugin PID ${pid}`);
+  }
+  return ppid;
+}
+
+async function inspectLinuxProcProcess(pid: number): Promise<{ state: string; uid: number | null }> {
+  let stat: string;
+  let status: string | null = null;
+  try {
+    [stat, status] = await Promise.all([
+      readFile(`/proc/${pid}/stat`, "utf8"),
+      readFile(`/proc/${pid}/status`, "utf8").catch(() => null),
+    ]);
+  } catch (error) {
+    throw hostFailure(`cannot inspect linux dev supervisor PID ${pid} through /proc: ${describe(error)}`);
+  }
+  const state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0] ?? "";
+  const uidLine = status?.split("\n").find((line) => line.startsWith("Uid:"));
+  const uid = uidLine ? Number(uidLine.split(/\s+/u)[1]) : null;
+  return { state, uid: Number.isInteger(uid) ? uid : null };
+}
+
 
 function inspectProcessExecutable(pid: number): ProcessExecutable {
   const result = spawnSync("lsof", ["-nP", "-a", "-p", String(pid), "-d", "txt", "-FDsin"], { encoding: "utf8" });
