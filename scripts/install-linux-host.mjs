@@ -8,10 +8,15 @@ import { promisify } from "node:util";
 const run = promisify(execFile);
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const supportRoot = path.join(homedir(), ".local/share/meetless");
-const runtimeRoot = path.join(supportRoot, "runtime");
 
-// Verified dist layouts: the runtime package emits flat dist (cli.js plus the
-// sibling modules cli.js imports), while the plugin package nests under dist/src.
+// Dev-mode-from-repo (ledger ruling R1, final-review Issue 3): the systemd unit
+// runs the REPO checkout's runtime dist directly. Staging dist under
+// ~/.local/share/meetless/runtime could never start — dist/config.js imports
+// bare node_modules (zod/ws/...) that only resolve up-tree from the checkout,
+// and REPOSITORY_ROOT-relative paths (plugin, capture helper entry, vendored
+// paseo) would resolve wrong. Real bundling ships with the Task 11 package
+// (scripts/package-linux.mjs); .artifacts staging below is a dry-run preview.
+const runtimeCliSource = path.join(repositoryRoot, "packages/runtime/dist/cli.js");
 const runtimeDistSource = path.join(repositoryRoot, "packages/runtime/dist");
 const captureHelperSource = path.join(
   repositoryRoot,
@@ -19,9 +24,6 @@ const captureHelperSource = path.join(
 );
 const unitTemplatePath = path.join(repositoryRoot, "systemd/meetless-daemon.service");
 const unitPath = path.join(homedir(), ".config/systemd/user/meetless-daemon.service");
-
-const stagedCliPath = path.join(runtimeRoot, "cli.js");
-const stagedCaptureHelperPath = path.join(runtimeRoot, "capture-helper-entry.js");
 const stagingRoot = path.join(repositoryRoot, ".artifacts/linux-host-staging");
 
 const mode = process.argv[2] ?? "--dry-run";
@@ -42,33 +44,32 @@ if (mode === "--uninstall") {
 async function install() {
   await run("npm", ["run", "build:meetless"], { cwd: repositoryRoot });
   await assertSourcesPresent();
-  await mkdir(runtimeRoot, { recursive: true });
-  await cp(runtimeDistSource, runtimeRoot, { recursive: true });
-  await cp(captureHelperSource, stagedCaptureHelperPath);
   await writeRenderedUnit();
   await run("systemctl", ["--user", "daemon-reload"]);
   await run("systemctl", ["--user", "enable", "--now", "meetless-daemon.service"]);
-  console.log(`meetless daemon: systemctl --user status meetless-daemon`);
+  console.log(`meetless daemon (dev-mode-from-repo): systemctl --user status meetless-daemon`);
+  console.log(`ExecStart chạy runtime dist của repo: ${runtimeCliSource}`);
+  console.log(`runtime root (dữ liệu): ${supportRoot}`);
   console.log(`web companion: npm run runtime:web (http://localhost:8082)`);
 }
 
 async function dryRun() {
   await assertSourcesPresent();
-  // Stage inside the repo only (gitignored .artifacts); nothing outside the
-  // repository is written in dry-run mode.
+  // Preview-only staging inside the repo (gitignored .artifacts): --install
+  // copies NOTHING outside the repository; the unit runs the repo checkout.
   await rm(stagingRoot, { recursive: true, force: true });
   await mkdir(path.join(stagingRoot, "runtime"), { recursive: true });
   await cp(runtimeDistSource, path.join(stagingRoot, "runtime"), { recursive: true });
   await cp(captureHelperSource, path.join(stagingRoot, "runtime/capture-helper-entry.js"));
   const unit = await renderUnit();
-  console.log("[dry-run] Không ghi gì ra ngoài repo. Kế hoạch cài đặt:");
+  console.log("[dry-run] Không ghi gì ra ngoài repo. Kế hoạch cài đặt (dev-mode-from-repo):");
   console.log("");
-  console.log("1. Sao chép runtime (cả cây packages/runtime/dist, cli.js cần các module kề nó):");
-  console.log(`   ${runtimeDistSource}${path.sep}  ->  ${runtimeRoot}${path.sep}`);
-  console.log(`   (daemon: ${stagedCliPath})`);
-  console.log("2. Sao chép capture helper (chỉ stage + ghi nhận đường dẫn; wiring config là task sau):");
-  console.log(`   ${captureHelperSource}  ->  ${stagedCaptureHelperPath}`);
-  console.log(`   (đường dẫn tuyệt đối dự kiến cho captureHelperPath: ${stagedCaptureHelperPath})`);
+  console.log("1. KHÔNG sao chép runtime ra ngoài repo (bản preview nằm dưới .artifacts/linux-host-staging).");
+  console.log(`   ExecStart sẽ chạy thẳng cli.js của repo: ${runtimeCliSource}`);
+  console.log(`   (daemon cần node_modules của repo — dist/config.js import zod/ws — nên chạy từ checkout.)`);
+  console.log("2. Capture helper: runtime tự sinh wrapper chạy được tại");
+  console.log(`   ${supportRoot}/capture-helper (exec node <repo>/packages/meetless-plugin/dist/src/linux/capture-helper-entry.js)`);
+  console.log("   khi daemon start (packages/runtime/src/config.ts, prepareRuntime).");
   console.log(`3. Ghi unit file (render từ systemd/meetless-daemon.service): ${unitPath}`);
   console.log("");
   console.log("--- unit file sẽ ghi ---");
@@ -98,7 +99,7 @@ async function uninstall() {
   }
   await run("systemctl", ["--user", "daemon-reload"]).catch(() => {});
   await run("systemctl", ["--user", "reset-failed"]).catch(() => {});
-  console.log(`Giữ nguyên dữ liệu + runtime đã stage dưới ${supportRoot} (xóa tay nếu muốn).`);
+  console.log(`Giữ nguyên dữ liệu dưới ${supportRoot} và repo checkout (xóa tay nếu muốn).`);
 }
 
 async function writeRenderedUnit() {
@@ -109,14 +110,23 @@ async function writeRenderedUnit() {
 
 async function renderUnit() {
   const template = await readFile(unitTemplatePath, "utf8");
-  // ExecStart must point at the real staged cli.js and a real node binary:
+  // ExecStart must point at the repo checkout's cli.js and a real node binary:
   // systemd user units do not inherit the login shell PATH (e.g. nvm), so
-  // "/usr/bin/env node" is replaced with the node running this installer.
+  // "/usr/bin/env node %h/.local/share/meetless/runtime/cli.js" is replaced
+  // with the node running this installer and the absolute repo path rendered
+  // at install time. Paths are quoted so homedirs with spaces still parse.
   // The %h specifiers in Environment= lines are expanded by systemd itself.
-  return template.replace(
+  const rendered = template.replace(
     "/usr/bin/env node %h/.local/share/meetless/runtime/cli.js",
-    `${process.execPath} ${stagedCliPath}`,
+    `"${process.execPath}" "${runtimeCliSource}"`,
   );
+  const execLine = rendered.split("\n").find((line) => line.startsWith("ExecStart="));
+  if (!execLine || !execLine.includes(runtimeCliSource)) {
+    throw new Error(
+      `Không render được ExecStart từ unit template ${unitTemplatePath}; xem lại dòng ExecStart của template.`,
+    );
+  }
+  return rendered;
 }
 
 async function assertSourcesPresent() {
@@ -127,13 +137,13 @@ async function assertSourcesPresent() {
   }
   if (missing.length > 0) {
     console.error("Thiếu artifact build. Chạy trước:");
-    console.error("    npm run build:paseo:types && npm run build:meetless");
+    console.error("    npm run build:paseo && npm run build:meetless");
     for (const candidate of missing) console.error(`  thiếu: ${candidate}`);
     process.exit(1);
   }
-  const cliExists = await stat(path.join(runtimeDistSource, "cli.js")).then(() => true, () => false);
+  const cliExists = await stat(runtimeCliSource).then(() => true, () => false);
   if (!cliExists) {
-    console.error(`Thiếu ${path.join(runtimeDistSource, "cli.js")}. Chạy: npm run build:meetless`);
+    console.error(`Thiếu ${runtimeCliSource}. Chạy: npm run build:meetless`);
     process.exit(1);
   }
 }

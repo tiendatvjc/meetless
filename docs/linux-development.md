@@ -32,23 +32,32 @@ build, tức toàn bộ `build:paseo`.
 
 Runtime root trên Linux: `~/.local/share/meetless` (macOS dùng thư mục app support).
 
-- **Dry-run (mặc định, không ghi gì ra ngoài repo):** in kế hoạch stage, unit file
+Service chạy **dev-mode-from-repo**: `ExecStart` trỏ thẳng vào
+`packages/runtime/dist/cli.js` của repo checkout (render đường dẫn tuyệt đối
+khi install) với node của người cài; `MEETLESS_RUNTIME_ROOT` vẫn giữ
+`~/.local/share/meetless`. Lý do (ruling R1): dist/config.js import
+node_modules (zod/ws/…) chỉ resolve từ cây repo, và các đường dẫn
+REPOSITORY_ROOT-relative (plugin, capture helper entry, vendored paseo) chỉ đúng
+từ checkout. Bundling thật nằm ở pipeline đóng gói (`npm run package:linux`);
+`--install` không sao chép gì ra ngoài repo (staging dưới `.artifacts` chỉ là
+preview dry-run).
+
+- **Dry-run (mặc định, không ghi gì ra ngoài repo):** in kế hoạch, unit file
   sẽ ghi và các lệnh systemctl sẽ chạy.
 
 ```bash
 npm run host:linux:install
 ```
 
-- **Cài thật:** build TS, sao chép `packages/runtime/dist` cùng
-  `capture-helper-entry.js` vào `~/.local/share/meetless/runtime/`, ghi
-  `~/.config/systemd/user/meetless-daemon.service` rồi enable service.
+- **Cài thật:** build TS, ghi `~/.config/systemd/user/meetless-daemon.service`
+  (ExecStart = repo checkout) rồi enable service.
 
 ```bash
 npm run host:linux:apply
 ```
 
 - **Gỡ service:** dừng, disable và xóa unit file (giữ nguyên dữ liệu dưới
-  `~/.local/share/meetless`).
+  `~/.local/share/meetless` và repo checkout).
 
 ```bash
 npm run host:linux:uninstall
@@ -60,12 +69,17 @@ npm run host:linux:uninstall
 npm run runtime:linux:status
 ```
 
-Capture helper được stage tại `~/.local/share/meetless/runtime/capture-helper-entry.js`;
-việc wiring `captureHelperPath` vào config là task sau.
+Capture helper: khi daemon start, runtime tự sinh wrapper chạy được tại
+`~/.local/share/meetless/capture-helper` (`exec node
+<repo>/packages/meetless-plugin/dist/src/linux/capture-helper-entry.js`,
+`--fixture` truyền qua nguyên vẹn) — xem `captureHelperCommand` trong
+`packages/runtime/src/config.ts`. Không cần wiring thủ công.
 
 ## BYOK OpenAI key (transcription)
 
-Linux không có transcription managed. Tạo tay file key (chưa có writer):
+Linux không có transcription managed: BYOK key là điều kiện để recording
+production start được miễn socket native (managed route vẫn yêu cầu socket đó
+nhưng không tồn tại trên Linux). Tạo tay file key (chưa có writer):
 
 ```bash
 mkdir -p ~/.local/share/meetless
@@ -74,6 +88,10 @@ cat > ~/.local/share/meetless/byok-openai.json <<'EOF'
 EOF
 chmod 600 ~/.local/share/meetless/byok-openai.json
 ```
+
+File key được đọc từ runtime root của daemon (`MEETLESS_RUNTIME_ROOT`,
+mặc định `~/.local/share/meetless`) — chạy root khác thì đặt key vào
+`<runtime-root>/byok-openai.json`.
 
 ## Web companion
 
@@ -103,6 +121,19 @@ Các bước smoke:
 5. Ghi kết quả + ngày vào mục "Verified on" (kèm lỗi/manifest nếu fail).
 
 ## Verified on
+
+- 2026-09-13, final fix wave: `npm run host:linux:apply` (sau fix Issue 3) —
+  service `meetless-daemon.service` active, ExecStart chạy
+  `packages/runtime/dist/cli.js daemon` của repo, Paseo Supervisor + Daemon
+  sống, nghe TCP 127.0.0.1:8081, runtime root `~/.local/share/meetless` có
+  wrapper `capture-helper` (0755) do runtime sinh. `npm run proof:linux` (sau
+  fix Issues 1/2/5): daemon stage khẳng định plugin health qua
+  `waitForRecordingRuntime` (pluginId meetless/running, captureMode
+  production, sessionStatus idle); cả 6 stage `ok:true`, exit 0; stage desktop
+  lần đầu đạt renderer HTTP 200 (`http://127.0.0.1:18086`, 3.6s) — electron
+  binarydev fail "Electron failed to install correctly" là lỗi môi trường
+  node_modules/electron sau khi renderer đã trả 200. Manifest:
+  `.artifacts/linux-proof/manifest-20260913T134752.json`.
 
 - 2026-09-13, Ubuntu 26.04.1, Node v24.16.0: `npm run proof:linux` (sau khi đổi
   sang `build:paseo` đầy đủ) — daemon probe stage 0 nghe TCP tại
