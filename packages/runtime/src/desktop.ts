@@ -1221,9 +1221,9 @@ async function serveCapturePermissionRequest(
       return;
     }
     // linux-port: PipeWire/PulseAudio session capture has no TCC-style gate
-    // and no native transcription socket; report granted before touching one.
+    // and no native transcription socket; report authorized before touching one.
     if (process.platform === "linux") {
-      respondJson(response, 200, { microphone: "granted", systemAudio: "granted" }, noStoreHeaders);
+      respondJson(response, 200, { microphone: "authorized", systemAudio: "authorized" }, noStoreHeaders);
       return;
     }
     if (!boundary.nativeSocket) {
@@ -1263,7 +1263,7 @@ async function serveCapturePermissionRequest(
   }
   // linux-port: see the status branch above.
   if (process.platform === "linux") {
-    respondJson(response, 200, { microphone: "granted", systemAudio: "granted" }, noStoreHeaders);
+    respondJson(response, 200, { microphone: "authorized", systemAudio: "authorized" }, noStoreHeaders);
     return;
   }
   if (!boundary.nativeSocket) {

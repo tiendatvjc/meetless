@@ -30,7 +30,7 @@ describe.skipIf(process.platform !== "linux")("linux capture permission boundary
   it("reports both capture sources granted instead of 503", async () => {
     const response = await fetch(`${origin}/__meetless/capture-permissions`, { cache: "no-store" });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ microphone: "granted", systemAudio: "granted" });
+    expect(await response.json()).toEqual({ microphone: "authorized", systemAudio: "authorized" });
   });
 
   it("serves the renderer index for the app root", async () => {
