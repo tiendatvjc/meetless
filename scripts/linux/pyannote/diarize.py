@@ -16,7 +16,7 @@ Token: đọc từ --hf-token-file (mặc định ~/.local/share/meetless/tools/
 fallback env HF_TOKEN.
 
 Exit code: 0 = ok; 2 = thiếu token (stderr: DIARIZE_TOKEN_MISSING);
-           3 = lỗi model/inference (stderr: DIARIZE_ERROR: <msg>).
+           3 = lỗi argv/model/inference (stderr: DIARIZE_ERROR: <msg>).
 """
 from __future__ import annotations
 
@@ -36,12 +36,13 @@ def emit_progress(fraction: float) -> None:
 
 
 def read_token(token_file: str | Path) -> str | None:
-    """Token từ file (một token/dòng), fallback env HF_TOKEN."""
+    """Token từ file — chỉ dòng đầu tiên không rỗng (một token/dòng), fallback env HF_TOKEN."""
     try:
-        token = Path(token_file).read_text(encoding="utf-8").strip()
-        if token:
-            return token
-    except OSError:
+        for line in Path(token_file).read_text(encoding="utf-8").splitlines():
+            token = line.strip()
+            if token:
+                return token
+    except (OSError, UnicodeDecodeError):
         pass
     import os
 
@@ -85,6 +86,7 @@ def merge_turns(turns: list[tuple[str, float, float]]) -> list[tuple[str, float,
 
 
 def run_diarization(audio_path: Path, out_path: Path, token: str, chunk_minutes: float) -> None:
+    emit_progress(0.0)  # tín hiệu "còn sống" trước cả khi tải model / chạy chunk đầu (có thể rất lâu)
     import torch
     from pyannote.audio import Audio, Pipeline
     from pyannote.core import Segment
@@ -142,6 +144,13 @@ def run_diarization(audio_path: Path, out_path: Path, token: str, chunk_minutes:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Meetless speaker-diarization sidecar (pyannote)")
+
+    def _usage_error(message: str) -> None:
+        # argparse mặc định exit 2 — nhưng 2 đã dành cho "thiếu token" → lỗi argv phải exit 3.
+        print(f"DIARIZE_ERROR: {message}", file=sys.stderr)
+        sys.exit(3)
+
+    parser.error = _usage_error  # type: ignore[method-assign]
     parser.add_argument("--audio", required=True, type=Path, help="file WAV đầu vào")
     parser.add_argument("--out", required=True, type=Path, help="file JSON turns đầu ra")
     parser.add_argument(
@@ -154,10 +163,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if not args.audio.is_file():
-        print(f"DIARIZE_ERROR: không tìm thấy file audio: {args.audio}", file=sys.stderr)
-        return 3
-
+    # Kiểm tra token TRƯỚC audio: thiếu cả hai phải trả 2 (tín hiệu "chưa setup" quan trọng hơn).
     token = read_token(args.hf_token_file)
     if not token:
         print("DIARIZE_TOKEN_MISSING", file=sys.stderr)
@@ -166,6 +172,10 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+
+    if not args.audio.is_file():
+        print(f"DIARIZE_ERROR: không tìm thấy file audio: {args.audio}", file=sys.stderr)
+        return 3
 
     try:
         run_diarization(args.audio, args.out, token, args.chunk_minutes)

@@ -118,8 +118,8 @@ HF token (bắt buộc — model pyannote là gated):
        https://huggingface.co/pyannote/segmentation-3.0
   2. Tạo token (quyền read) tại: https://huggingface.co/settings/tokens
   3. Lưu token (một token/dòng) rồi chmod 600:
-       printf 'TOKEN_CUA_BAN' > $TOKEN_FILE
-       chmod 600 $TOKEN_FILE
+       printf 'TOKEN_CUA_BAN' > "$TOKEN_FILE"
+       chmod 600 "$TOKEN_FILE"
   (lần chạy đầu sidecar sẽ tải model ~600MB vào ~/.cache/huggingface)
 EOF
 
