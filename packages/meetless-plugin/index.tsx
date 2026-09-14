@@ -26,6 +26,7 @@ import {
   MeetingTranscriptionConsentRpc,
 } from "@meetless/meeting-contracts";
 import { RecordingRuntimeBootstrapRpc } from "./src/readiness-protocol.js";
+import { MICROPHONE_SPEAKER_LABEL } from "./src/diarization/attribution.js";
 
 export interface MeetlessContributionOptions {
   /** Test-only module seam; production uses the trusted server composition. */
@@ -248,11 +249,11 @@ function toTranscriptWire(
     ranges: transcript.ranges,
     segments: transcript.checkpoints.map((checkpoint) => {
       // The diarization overlay refines system-side labels; the microphone
-      // side ("Bạn") and unlabeled legacy segments only gain labels when the
-      // overlay has an entry for the exact segment id. The "Bạn" guard keeps
+      // side and unlabeled legacy segments only gain labels when the overlay
+      // has an entry for the exact segment id. The microphone guard keeps
       // that invariant local: a stale overlay entry can never relabel the
       // microphone side.
-      const speakerLabel = checkpoint.speakerLabel === "Bạn"
+      const speakerLabel = checkpoint.speakerLabel === MICROPHONE_SPEAKER_LABEL
         ? checkpoint.speakerLabel
         : overlay?.get(checkpoint.range.segmentId) ?? checkpoint.speakerLabel;
       return {

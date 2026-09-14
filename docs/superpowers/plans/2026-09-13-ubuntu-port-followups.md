@@ -82,3 +82,5 @@ byte-identical; không cần model/HF token).
 - [ ] A-phase residuals (A3/A4): concat-before-mismatch-check perf, duplicate
   sameRangePlan + double plan build, surface literal "Bạn" vs shared constant,
   custom ranges unbounded (lý thuyết).
+- Đóng residual `--chunk-minutes <= 0`: diarize.py đã clamp sẵn (`chunk_seconds = max(chunk_minutes, 0.05) * 60.0`) — bỏ mục này khỏi danh sách còn lại.
+- Triage review cuối nhánh speaker (14-09): chỉ còn 1 gate pre-merge — real-2-sided smoke do user tự chạy (user-gated); bundle ưu tiên tiếp theo: fast-fail + transcript-cap.

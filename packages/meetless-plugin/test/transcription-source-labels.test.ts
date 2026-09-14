@@ -8,7 +8,9 @@ import type { SourceTimeline } from "../src/source-timeline.js";
 import {
   buildTwoSourceTranscriptPlan,
   resolveTwoSourcePlan,
+  SPEAKER_LABELS,
 } from "../src/two-source-plan.js";
+import { MICROPHONE_SPEAKER_LABEL } from "../src/diarization/attribution.js";
 import { transcribeTwoSourceRecording } from "../src/transcription-service.js";
 
 const roots = new Set<string>();
@@ -42,6 +44,10 @@ const system = timeline("system", [
 ]);
 
 describe("two-source transcript plan", () => {
+  test("microphone speaker label is the single diarization-stage constant", () => {
+    expect(SPEAKER_LABELS.microphone).toBe(MICROPHONE_SPEAKER_LABEL);
+  });
+
   test("interleaves per-source windows on the logical timeline, microphone first on ties, with speaker labels", () => {
     const plan = buildTwoSourceTranscriptPlan({
       microphone, system, recordingId: "r-1", audioSha256: "audio-sha", rangeMs: 1_000,

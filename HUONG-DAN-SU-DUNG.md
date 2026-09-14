@@ -164,11 +164,16 @@ Lần chạy **đầu tiên** sẽ tải model ~600MB vào `~/.cache/huggingface
 ### Dùng trong app
 
 1. Mở meeting đã có transcript (đã bấm Transcribe xong).
-2. Bấm nút **Nhận diện người nói** → chờ (xem tiến độ trên nút).
+2. Bấm nút **Nhận diện người nói** → chờ: trong lúc chạy, nút được thay bằng
+   dòng tiến độ phần trăm ("Đang nhận diện… X%").
 3. Xong: các đoạn hệ thống được gán `Người 1`, `Người 2`, …; các đoạn micro của
    bạn vẫn giữ nhãn `Bạn`. Chạy lại lần nữa → ghi đè kết quả mới (an toàn).
 4. **Đổi tên người**: bấm đổi tên người nói → gõ tên thật → Lưu. Đổi tên không
    sửa transcript gốc — chỉ đổi nhãn hiển thị (luôn hoàn tác được bằng chạy lại).
+
+Lưu ý: họp dài hơn 15 phút được xử lý theo từng khối 15 phút, nên cùng một người
+có thể xuất hiện dưới hơn một nhãn "Người N" ở ranh giới giữa các khối — cứ đổi
+tên thoải mái, hoặc chạy lại nhận diện sau cuộc họp dài.
 
 ### Thời gian chạy thực tế (CPU)
 

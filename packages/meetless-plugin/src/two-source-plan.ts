@@ -4,6 +4,7 @@ import {
   transcriptSegmentId,
 } from "@meetless/meeting-domain";
 import type { RecordingSource, SourceChunkOffset, SourceTimeline } from "./source-timeline.js";
+import { MICROPHONE_SPEAKER_LABEL } from "./diarization/attribution.js";
 
 /**
  * Speaker attribution stage A3: turn the two per-source capture timelines into
@@ -14,7 +15,7 @@ import type { RecordingSource, SourceChunkOffset, SourceTimeline } from "./sourc
  */
 
 export const SPEAKER_LABELS: Readonly<Record<RecordingSource, string>> = {
-  microphone: "Bạn",
+  microphone: MICROPHONE_SPEAKER_LABEL,
   system: "Cuộc họp",
 };
 
