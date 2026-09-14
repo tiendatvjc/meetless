@@ -4,7 +4,7 @@ import type { DiarizationStatusWire } from "@meetless/meeting-contracts";
 import type { MeetingStore } from "@meetless/meeting-store";
 import type { TranscriptState } from "@meetless/meeting-domain";
 import { buildSourceTimelines, type SourceChunkOffset } from "../source-timeline.js";
-import type { MeetingLifecycleCoordinator } from "../meeting-lifecycle-coordinator.js";
+import type { MeetingLifecycleCoordinator, MeetingLifecycleLease } from "../meeting-lifecycle-coordinator.js";
 import type { DiarizerProvider } from "./diarizer.js";
 import { DiarizationStore, type StoredDiarization } from "./diarization-store.js";
 import {
@@ -86,21 +86,25 @@ export class MeetingDiarizationService {
   }
 
   async run(meetingId: string): Promise<MeetingDiarizationOutcome> {
+    // Claim the meeting synchronously before the first await: two concurrent
+    // run RPCs must never both reach sidecar inference. Every early throw
+    // below releases the claim through the shared finally.
     if (this.running.has(meetingId)) {
-      return { status: await this.status(meetingId), transcript: await this.deps.store.getTranscriptForMeeting(meetingId) };
+      throw new Error("Diarization is already running for this meeting");
     }
-    const recording = await this.latestSavedRecording(meetingId);
-    if (!recording || recording.status !== "saved") {
-      throw new Error("Speaker diarization requires the meeting's saved recording");
-    }
-    const transcript = await this.deps.store.getTranscriptForMeeting(meetingId);
-    if (!transcript || transcript.status !== "ready") {
-      throw new Error("Speaker diarization requires a ready transcript");
-    }
-    const lease = this.deps.lifecycle?.tryAcquireWork(meetingId, "transcription");
-    if (this.deps.lifecycle && !lease) throw new Error("Meeting deletion is in progress");
     this.running.set(meetingId, { progress: 0 });
+    let lease: MeetingLifecycleLease | null = null;
     try {
+      const recording = await this.latestSavedRecording(meetingId);
+      if (!recording || recording.status !== "saved") {
+        throw new Error("Speaker diarization requires the meeting's saved recording");
+      }
+      const transcript = await this.deps.store.getTranscriptForMeeting(meetingId);
+      if (!transcript || transcript.status !== "ready") {
+        throw new Error("Speaker diarization requires a ready transcript");
+      }
+      lease = this.deps.lifecycle?.tryAcquireWork(meetingId, "transcription") ?? null;
+      if (this.deps.lifecycle && !lease) throw new Error("Meeting deletion is in progress");
       const timelines = await buildSourceTimelines(this.sessionDirectory(recording.id), recording.id, {
         ffmpeg: this.deps.ffmpeg,
       });

@@ -44,10 +44,11 @@ export class DiarizationStore {
   constructor(private readonly directory: string) {}
 
   async load(meetingId: string): Promise<StoredDiarization | null> {
-    const filePath = this.filePath(meetingId);
     let contents: string;
     try {
-      contents = await readFile(filePath, "utf8");
+      // filePath() throws for a path-unsafe meeting id; on the read path that
+      // must degrade to "no overlay" like any other unreadable file.
+      contents = await readFile(this.filePath(meetingId), "utf8");
     } catch {
       return null;
     }

@@ -203,7 +203,7 @@ function pcmWav(frameCount: number, marker: number): Buffer {
     expect(renamed.status.speakers).toEqual([{ id: "S1", name: "Renames Name X" }, { id: "S2", name: "Người 2" }]);
     expect((await service.overlayLabels("m-1")).get("segment-di-0")).toBe("Renames Name X");
 
-    // Stored under <storeRoot>/diarization/<meetingId>.json, not meetings.json.
+    // Stored under <storeRoot>/diarization-names/<meetingId>.json, not meetings.json.
     const storedPath = path.join(root, "diarization-names", "m-1.json");
     const stored = JSON.parse(await readFile(storedPath, "utf8")) as { speakers: Array<{ id: string; name: string }> };
     expect(stored.speakers[0]).toEqual({ id: "S1", name: "Renames Name X" });
@@ -211,6 +211,39 @@ function pcmWav(frameCount: number, marker: number): Buffer {
     expect(meetingsJson.includes("Renames Name X")).toBe(false);
 
     await expect(service.rename("m-missing", { S1: "X" })).rejects.toThrow(/No speaker diarization/u);
+  });
+
+  test("rejects a concurrent second run without invoking the provider twice", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "meetless-diarization-race-"));
+    roots.add(root);
+    const store = new MeetingStore({ root, now: () => now });
+    await createSavedRecording(store, "m-1", "r-1");
+    await writeSystemSessionChunks(root, "r-1");
+    await readyTranscript(store, "m-1", "r-1");
+    const turns: SpeakerTurn[] = [{ speaker: "S1", startMs: 0, endMs: 1_200 }];
+    let releaseInference: () => void = () => undefined;
+    const inference = new Promise<void>((resolve) => {
+      releaseInference = resolve;
+    });
+    const provider = {
+      available: async () => ({ ok: true }),
+      run: vi.fn(async (): Promise<SpeakerTurn[]> => {
+        await inference;
+        return turns;
+      }),
+    } satisfies DiarizerProvider;
+    const service = new MeetingDiarizationService({ storeRoot: root, store, provider, ffmpeg, now: () => now });
+
+    const first = service.run("m-1");
+    await expect(service.run("m-1")).rejects.toThrow(/already running for this meeting/u);
+    releaseInference();
+
+    const outcome = await first;
+    expect(provider.run).toHaveBeenCalledTimes(1);
+    expect(outcome.status).toMatchObject({ meetingId: "m-1", applied: true, running: false });
+    // The claim is released on the early-throw path too: a follow-up run of an
+    // ineligible meeting rejects for the eligibility reason, not the guard.
+    await expect(service.run("m-missing")).rejects.toThrow(/saved recording/u);
   });
 
   test("token-missing providers surface through status without running", async () => {
@@ -226,5 +259,7 @@ function pcmWav(frameCount: number, marker: number): Buffer {
     expect(await service.status("m-1")).toMatchObject({ available: false, unavailableReason: "token_missing" });
     const overlay = await readSpeakerLabelOverlay(root, "m-1");
     expect(overlay.size).toBe(0);
+    // A path-unsafe meeting id degrades to an empty overlay, never a throw.
+    await expect(readSpeakerLabelOverlay(root, "../../escape")).resolves.toEqual(new Map());
   });
 });

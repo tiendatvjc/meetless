@@ -114,18 +114,32 @@ describe("Meetless plugin contribution", () => {
       rangeMs: 30_000,
       maxAttempts: 3,
       audio: { destination: "meetings/r-diarize.mp3", byteLength: 128, sha256: "audio-sha", durationMs: 2_000 },
-      ranges: [{ ordinal: 0, startMs: 0, endMs: 2_000, segmentId: "segment-di-0" }],
-      checkpoints: [{
-        range: { ordinal: 0, startMs: 0, endMs: 2_000, segmentId: "segment-di-0" },
-        text: "hello",
-        attempts: 1,
-        completedAt: "2026-09-14T10:00:00.000Z",
-        usage: null,
-        detectedLanguages: ["vi"],
-        speakerLabel: "Cuộc họp",
-      }],
-      attemptsByOrdinal: { 0: 1 },
-      requestCount: 1,
+      ranges: [
+        { ordinal: 0, startMs: 0, endMs: 1_000, segmentId: "segment-di-0" },
+        { ordinal: 1, startMs: 1_000, endMs: 2_000, segmentId: "segment-di-1" },
+      ],
+      checkpoints: [
+        {
+          range: { ordinal: 0, startMs: 0, endMs: 1_000, segmentId: "segment-di-0" },
+          text: "hello",
+          attempts: 1,
+          completedAt: "2026-09-14T10:00:00.000Z",
+          usage: null,
+          detectedLanguages: ["vi"],
+          speakerLabel: "Cuộc họp",
+        },
+        {
+          range: { ordinal: 1, startMs: 1_000, endMs: 2_000, segmentId: "segment-di-1" },
+          text: "mic aside",
+          attempts: 1,
+          completedAt: "2026-09-14T10:00:02.000Z",
+          usage: null,
+          detectedLanguages: ["vi"],
+          speakerLabel: "Bạn",
+        },
+      ],
+      attemptsByOrdinal: { 0: 1, 1: 1 },
+      requestCount: 2,
       usage: null,
       detectedLanguages: ["vi"],
       startedAt: "2026-09-14T10:00:00.000Z",
@@ -140,7 +154,9 @@ describe("Meetless plugin contribution", () => {
         status: { ...appliedStatus, speakers: [{ id: "S1", name: "Renamed Speaker" }] },
         transcript: transcriptState,
       }),
-      transcriptSpeakerLabelOverlay: async () => new Map([["segment-di-0", "Người 1"]]),
+      // A stale overlay entry for the microphone-side segment must be ignored
+      // by the wire merge ("Bạn" guard).
+      transcriptSpeakerLabelOverlay: async () => new Map([["segment-di-0", "Người 1"], ["segment-di-1", "Người 2"]]),
     })) as unknown as NonNullable<MeetlessContributionOptions["loadServer"]>;
     const handle = vi.fn();
     const cleanup = createTestContribution({ loadServer })({ handle } as unknown as PluginContext);
@@ -152,13 +168,30 @@ describe("Meetless plugin contribution", () => {
 
     const run = MeetingDiarizationRunRpc.output.parse(await handler("meeting.diarization.run")({ meetingId: "m-diarize" }));
     expect(run.status.applied).toBe(true);
-    // The stored overlay replaces the stage-A system label on the wire.
+    // The stored overlay replaces the stage-A system label on the wire...
     expect(run.transcript?.segments[0]?.speakerLabel).toBe("Người 1");
+    // ...but the microphone-side label survives even a stale overlay entry.
+    expect(run.transcript?.segments[1]?.speakerLabel).toBe("Bạn");
 
     const renamed = MeetingDiarizationRenameRpc.output.parse(await handler("meeting.diarization.rename")({
       meetingId: "m-diarize", names: { S1: "Renamed Speaker" },
     }));
     expect(renamed.status.speakers).toEqual([{ id: "S1", name: "Renamed Speaker" }]);
+    await expect(cleanup()).resolves.toBeUndefined();
+  });
+
+  test("a duplicate diarization run rejects through the RPC as a typed failure", async () => {
+    const loadServer = vi.fn(async () => ({
+      runMeetingDiarization: async () => {
+        throw new Error("Diarization is already running for this meeting");
+      },
+    })) as unknown as NonNullable<MeetlessContributionOptions["loadServer"]>;
+    const handle = vi.fn();
+    const cleanup = createTestContribution({ loadServer })({ handle } as unknown as PluginContext);
+    const runHandler = handle.mock.calls.find(([rpc]) => rpc.name === "meeting.diarization.run")![1] as
+      (input: unknown) => Promise<unknown>;
+
+    await expect(runHandler({ meetingId: "m-diarize" })).rejects.toThrow(/already running for this meeting/u);
     await expect(cleanup()).resolves.toBeUndefined();
   });
 

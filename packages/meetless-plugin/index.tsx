@@ -110,13 +110,20 @@ export default function contribute(plugin: PluginContext) {
   });
   plugin.handle(MeetingDiarizationRunRpc, async ({ meetingId }) => {
     const server = await (testLoadServerByContext.get(plugin) ?? (() => import("./src/server.js")))();
-    const result = await server.runMeetingDiarization(meetingId);
-    return {
-      status: result.status,
-      transcript: result.transcript
-        ? toTranscriptWire(result.transcript, await overlayOf(server, meetingId))
-        : null,
-    };
+    try {
+      const result = await server.runMeetingDiarization(meetingId);
+      return {
+        status: result.status,
+        transcript: result.transcript
+          ? toTranscriptWire(result.transcript, await overlayOf(server, meetingId))
+          : null,
+      };
+    } catch (error) {
+      // The duplicate-run guard rejects with "Diarization is already running
+      // for this meeting"; a rejected run RPC is the typed failure surface,
+      // and the app's existing run-failure copy renders it as error state.
+      throw error instanceof Error ? error : new Error("Speaker diarization failed");
+    }
   });
   plugin.handle(MeetingDiarizationRenameRpc, async ({ meetingId, names }) => {
     const server = await (testLoadServerByContext.get(plugin) ?? (() => import("./src/server.js")))();
@@ -242,8 +249,12 @@ function toTranscriptWire(
     segments: transcript.checkpoints.map((checkpoint) => {
       // The diarization overlay refines system-side labels; the microphone
       // side ("Bạn") and unlabeled legacy segments only gain labels when the
-      // overlay has an entry for the exact segment id.
-      const speakerLabel = overlay?.get(checkpoint.range.segmentId) ?? checkpoint.speakerLabel;
+      // overlay has an entry for the exact segment id. The "Bạn" guard keeps
+      // that invariant local: a stale overlay entry can never relabel the
+      // microphone side.
+      const speakerLabel = checkpoint.speakerLabel === "Bạn"
+        ? checkpoint.speakerLabel
+        : overlay?.get(checkpoint.range.segmentId) ?? checkpoint.speakerLabel;
       return {
         range: checkpoint.range,
         text: checkpoint.text,
