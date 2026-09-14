@@ -2550,6 +2550,11 @@ function FocusPressable({
   return (
     <Pressable
       {...props}
+      // linux-port: RN-web leaves the press responder stale on Pressables that
+      // mounted disabled and later enabled (visible-enabled but never fires).
+      // Remount the host whenever the disabled flag flips so the responder
+      // re-arms; covers every toggle-gated button app-wide.
+      key={props.disabled ? "disabled" : "enabled"}
       focusable
       onFocus={(event) => { setFocused(true); onFocus?.(event); }}
       onBlur={(event) => { setFocused(false); onBlur?.(event); }}
