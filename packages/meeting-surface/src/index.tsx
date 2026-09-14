@@ -2472,6 +2472,16 @@ function TranscriptState({
               >
                 <Text style={styles.segmentRange}>{formatRange(segment.range.startMs, segment.range.endMs)}</Text>
               </FocusPressable>
+              {segment.speakerLabel ? (
+                <View
+                  style={[styles.speakerChip, segment.speakerLabel === "Bạn" ? styles.speakerChipMicrophone : styles.speakerChipSystem]}
+                  testID={`speaker-chip-${segment.range.segmentId}`}
+                >
+                  <Text style={[styles.speakerChipText, segment.speakerLabel === "Bạn" ? styles.speakerChipTextMicrophone : styles.speakerChipTextSystem]}>
+                    {segment.speakerLabel}
+                  </Text>
+                </View>
+              ) : null}
               <Text style={styles.segmentText}>{segment.text.trim() || "No spoken text returned for this segment"}</Text>
             </View>
           );
@@ -2792,6 +2802,12 @@ const styles = StyleSheet.create({
   segmentHighlighted: { borderColor: "rgba(94,106,210,0.45)", backgroundColor: "rgba(94,106,210,0.14)" },
   segmentButton: { width: 74, flexShrink: 0, paddingVertical: 2 },
   segmentRange: { color: colors.muted, fontFamily: mono, fontSize: 11.5 },
+  speakerChip: { alignSelf: "flex-start", marginTop: 2, flexShrink: 0, flexDirection: "row", alignItems: "center", borderColor: colors.borderSoft, borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  speakerChipMicrophone: { backgroundColor: "rgba(94,106,210,0.14)", borderColor: "rgba(94,106,210,0.45)" },
+  speakerChipSystem: { backgroundColor: "rgba(255,255,255,0.04)" },
+  speakerChipText: { fontFamily: mono, fontSize: 10.5, letterSpacing: 0.2 },
+  speakerChipTextMicrophone: { color: colors.accentHover },
+  speakerChipTextSystem: { color: colors.muted },
   segmentText: { color: colors.secondary, flex: 1, minWidth: 0, fontSize: 14, lineHeight: 22 },
   askHeading: { flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0 },
   askScope: { color: colors.muted, fontFamily: mono, fontSize: 10.5, borderColor: colors.borderSoft, borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },

@@ -1210,6 +1210,52 @@ describe("responsive meeting sidebar and transcript detail", () => {
     await act(async () => { renderer!.unmount(); });
   });
 
+  test("renders speaker chips only for labeled segments", async () => {
+    const onCitation = vi.fn(async () => undefined);
+    const ready = transcript("ready");
+    ready.segments.push(
+      {
+        range: { ordinal: 1, startMs: 1_000, endMs: 2_000, segmentId: "segment-2" },
+        text: "second segment",
+        completedAt: "2026-08-18T10:00:01.000Z",
+        detectedLanguages: ["vi"],
+        speakerLabel: "Bạn",
+      },
+      {
+        range: { ordinal: 2, startMs: 2_000, endMs: 3_000, segmentId: "segment-3" },
+        text: "third segment",
+        completedAt: "2026-08-18T10:00:02.000Z",
+        detectedLanguages: ["vi"],
+        speakerLabel: "Cuộc họp",
+      },
+    );
+    let renderer: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(
+        <MeetingListSurface selectedRecording={{ recordingId: "r-selected", status: "saved" }}
+          canCreate={false}
+          compact
+          connectionLabel="Connected"
+          hostLabel="isolated host"
+          meetings={[meeting("m-1")]}
+          onCitation={onCitation}
+          onRefresh={async () => undefined}
+          selectedMeetingId="m-1"
+          transcript={ready}
+          consentStatus="granted"
+        />,
+      );
+    });
+
+    const micChip = renderer!.root.findByProps({ testID: "speaker-chip-segment-2" });
+    expect(micChip.findByProps({ children: "Bạn" })).toBeTruthy();
+    const systemChip = renderer!.root.findByProps({ testID: "speaker-chip-segment-3" });
+    expect(systemChip.findByProps({ children: "Cuộc họp" })).toBeTruthy();
+    // The first segment carries no speakerLabel, so no chip renders for it.
+    expect(renderer!.root.findAllByProps({ testID: "speaker-chip-segment-1" })).toHaveLength(0);
+    await act(async () => { renderer!.unmount(); });
+  });
+
   test("renders every ready segment once and timestamp presses carry only stable identity", async () => {
     const onCitation = vi.fn(async () => undefined);
     const ready = transcript("ready");
