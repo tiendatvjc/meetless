@@ -75,8 +75,9 @@ export class OpenAiByokTranscriptionProvider implements TranscriptionProvider {
     if (response.status === 401) throw new Error("BYOK transcription rejected the configured API key");
     if (!response.ok) throw new Error(`BYOK transcription failed with HTTP ${response.status}`);
     const payload = (await response.json()) as { text?: string };
+    // A silent range legitimately transcribes to empty text (nobody spoke);
+    // that completes the range instead of failing it.
     const text = (payload.text ?? "").trim();
-    if (!text) throw new Error("BYOK transcription returned empty text");
     return { text, detectedLanguages: [...OPENAI_TRANSCRIPTION_LANGUAGES], usage: null };
   }
 }
