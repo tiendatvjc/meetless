@@ -12,6 +12,7 @@ import {
   type ManagedTimelineArtifactOwner,
 } from "./finalizer.js";
 import { readInventory, RecordingInventoryReconciler, resolveStorePath, ZeroValidMediaError } from "./inventory.js";
+import { buildSourceTimelines } from "./source-timeline.js";
 import type { CollisionEvidence } from "./readiness-protocol.js";
 import type { TranscriptionService } from "./transcription-service.js";
 import { MeetingLifecycleCoordinator, type MeetingLifecycleLease } from "./meeting-lifecycle-coordinator.js";
@@ -538,6 +539,15 @@ export class RecordingService {
       const chunks = cleanupInventory.pointer
         ? readInventory(this.config.storeRoot, cleanupInventory.pointer)
         : arrayChunks(cleanupInventory.legacyChunks);
+      // speaker/linux-port: materialize per-source timeline WAVs before chunk
+      // cleanup so stage-A labeled transcription and post-hoc diarization can
+      // reconstruct the two sides after the session chunks are gone.
+      try {
+        const sessionDir = path.join(this.config.storeRoot, "sessions", recording.id);
+        await buildSourceTimelines(sessionDir, recording.id, { ffmpeg: this.config.ffmpeg });
+      } catch (error) {
+        process.stderr.write(`[meetless-recording] per-source timeline preservation deferred: ${describe(error)}\n`);
+      }
       for await (const chunk of chunks) {
         await rm(resolveStorePath(this.config.storeRoot, chunk.storageKey), { force: true }).catch((error) => {
           process.stderr.write(`[meetless-recording] saved chunk cleanup deferred: ${describe(error)}\n`);
