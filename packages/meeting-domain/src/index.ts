@@ -806,6 +806,8 @@ export interface TranscriptCheckpoint {
   completedAt: string;
   usage: TranscriptUsage | null;
   detectedLanguages: string[];
+  /** Optional speaker attribution; absent on single-source (mixed) transcripts. */
+  speakerLabel?: string;
 }
 
 export interface TranscriptPublication {
@@ -897,6 +899,31 @@ function checkedTranscriptIdentity(identity: TranscriptAudioIdentity): Transcrip
   };
 }
 
+/**
+ * Custom range plans keep the planner's structural guarantees: non-empty,
+ * half-open, and uniquely identified by ordinal and segment id so durable
+ * attempt accounting stays unambiguous.
+ */
+function checkedTranscriptRanges(ranges: readonly TranscriptRange[]): TranscriptRange[] {
+  if (ranges.length === 0) {
+    throw transcriptViolation("Transcript range plans cannot be empty", "Plan at least one audio range.");
+  }
+  const ordinals = new Set<number>();
+  const segmentIds = new Set<string>();
+  return ranges.map((range) => {
+    const ordinal = transcriptNonNegativeInteger(range.ordinal, "range ordinal");
+    const startMs = transcriptNonNegativeInteger(range.startMs, "range start");
+    const endMs = transcriptPositiveInteger(range.endMs, "range end");
+    const segmentId = range.segmentId.trim();
+    if (endMs <= startMs) throw transcriptViolation("Transcript ranges must be half-open and non-empty", "Use endMs greater than startMs.");
+    if (ordinals.has(ordinal)) throw transcriptViolation("Transcript range ordinals must be unique", "Plan each range ordinal once.");
+    if (!segmentId || segmentIds.has(segmentId)) throw transcriptViolation("Transcript range segment ids must be unique and non-empty", "Plan a distinct segment id per range.");
+    ordinals.add(ordinal);
+    segmentIds.add(segmentId);
+    return { ordinal, startMs, endMs, segmentId };
+  });
+}
+
 function stableTranscriptHash(value: string): string {
   // Four independent FNV-style lanes keep the identifier deterministic without
   // making the policy package depend on a storage or runtime crypto API.
@@ -985,6 +1012,11 @@ export function createTranscript(input: {
   now: string;
   rangeMs?: number;
   maxAttempts?: number;
+  /**
+   * Deterministic range plan override (two-source speaker attribution).
+   * Defaults to the standard single-audio planner over the audio duration.
+   */
+  ranges?: readonly TranscriptRange[];
 }): TranscriptState {
   const now = transcriptInstant(input.now, "transcript timestamp");
   const meetingId = input.meetingId.trim();
@@ -993,12 +1025,14 @@ export function createTranscript(input: {
   if (!meetingId || !recordingId || !audio.destination || !audio.sha256) {
     throw transcriptViolation("Transcript identity must be complete", "Provide the saved recording and MP3 identity.");
   }
-  const ranges = planTranscriptRanges({
-    recordingId,
-    audioSha256: audio.sha256,
-    durationMs: audio.durationMs,
-    rangeMs: input.rangeMs,
-  });
+  const ranges = input.ranges
+    ? checkedTranscriptRanges(input.ranges)
+    : planTranscriptRanges({
+      recordingId,
+      audioSha256: audio.sha256,
+      durationMs: audio.durationMs,
+      rangeMs: input.rangeMs,
+    });
   const maxAttempts = input.maxAttempts ?? DEFAULT_TRANSCRIPT_MAX_ATTEMPTS;
   transcriptPositiveInteger(maxAttempts, "transcript maximum attempts");
   return {
@@ -1060,6 +1094,8 @@ export function checkpointTranscriptRange(
     attempts: number;
     usage: TranscriptUsage | null;
     detectedLanguages?: readonly string[];
+    /** Optional speaker attribution for two-source transcripts; empty is absent. */
+    speakerLabel?: string;
     now: string;
   },
 ): TranscriptState {
@@ -1075,6 +1111,7 @@ export function checkpointTranscriptRange(
     throw transcriptViolation("Transcript checkpoint attempts must match durable request accounting", "Reuse the persisted request attempt.");
   }
   const now = transcriptInstant(input.now, "transcript checkpoint timestamp");
+  const speakerLabel = input.speakerLabel?.trim();
   const checkpoint: TranscriptCheckpoint = {
     range: expected,
     text: input.text,
@@ -1082,6 +1119,7 @@ export function checkpointTranscriptRange(
     completedAt: now,
     usage: input.usage,
     detectedLanguages: mergeTranscriptLanguages([], input.detectedLanguages ?? []),
+    ...(speakerLabel ? { speakerLabel } : {}),
   };
   const checkpoints = [...transcript.checkpoints, checkpoint];
   return {

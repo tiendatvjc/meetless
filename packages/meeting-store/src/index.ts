@@ -38,6 +38,7 @@ import {
   type TranscriptAudioIdentity,
   type TranscriptCitation,
   type TranscriptPublication,
+  type TranscriptRange,
   type TranscriptState,
   type TranscriptUsage,
   type ChatSelection,
@@ -381,6 +382,7 @@ const TranscriptCheckpointSchema = z.object({
   completedAt: z.string().datetime(),
   usage: TranscriptUsageSchema.nullable(),
   detectedLanguages: z.array(z.string().trim().min(1)),
+  speakerLabel: z.string().trim().max(80).optional(),
 }).strict();
 
 const TranscriptSchema = z.object({
@@ -454,7 +456,11 @@ const TranscriptSidecarSchema = z.object({
     durationMs: z.number().int().positive(),
   }).strict(),
   ranges: z.array(TranscriptRangeSchema).min(1),
-  segments: z.array(z.object({ range: TranscriptRangeSchema, text: z.string() }).strict()),
+  segments: z.array(z.object({
+    range: TranscriptRangeSchema,
+    text: z.string(),
+    speakerLabel: z.string().trim().max(80).optional(),
+  }).strict()),
   usage: TranscriptUsageSchema.nullable(),
   detectedLanguages: z.array(z.string().trim().min(1)),
   publishedAt: z.string().datetime(),
@@ -836,6 +842,8 @@ export class MeetingStore {
     audio: TranscriptAudioIdentity;
     rangeMs?: number;
     maxAttempts?: number;
+    /** Deterministic range plan override (two-source speaker attribution); creation only. */
+    ranges?: readonly TranscriptRange[];
   }): Promise<TranscriptState> {
     return this.mutate(async (state) => {
       const existing = state.transcripts.find((transcript) => transcript.recordingId === input.recordingId);
@@ -869,6 +877,7 @@ export class MeetingStore {
         now: this.now(),
         rangeMs: input.rangeMs,
         maxAttempts: input.maxAttempts ?? DEFAULT_TRANSCRIPT_MAX_ATTEMPTS,
+        ranges: input.ranges,
       });
       state.transcripts.push(transcript);
       return transcript;
@@ -895,6 +904,7 @@ export class MeetingStore {
     attempts: number;
     usage: TranscriptUsage | null;
     detectedLanguages?: readonly string[];
+    speakerLabel?: string;
   }): Promise<TranscriptState> {
     return this.changeTranscript(id, (transcript) => checkpointTranscriptRange(transcript, { ...input, now: this.now() }));
   }
@@ -1537,7 +1547,11 @@ export class MeetingStore {
       plannerVersion: transcript.plannerVersion,
       audio: transcript.audio,
       ranges: transcript.ranges,
-      segments: transcript.checkpoints.map((checkpoint) => ({ range: checkpoint.range, text: checkpoint.text })),
+      segments: transcript.checkpoints.map((checkpoint) => ({
+        range: checkpoint.range,
+        text: checkpoint.text,
+        ...(checkpoint.speakerLabel ? { speakerLabel: checkpoint.speakerLabel } : {}),
+      })),
       usage: transcript.usage,
       detectedLanguages: transcript.detectedLanguages,
       publishedAt,

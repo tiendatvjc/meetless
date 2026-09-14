@@ -200,6 +200,7 @@ function toTranscriptWire(transcript: import("@meetless/meeting-domain").Transcr
       text: checkpoint.text,
       completedAt: checkpoint.completedAt,
       detectedLanguages: checkpoint.detectedLanguages,
+      ...(checkpoint.speakerLabel ? { speakerLabel: checkpoint.speakerLabel } : {}),
     })),
     requestCount: transcript.requestCount,
     usage: transcript.usage,

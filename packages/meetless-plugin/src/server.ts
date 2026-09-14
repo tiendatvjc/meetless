@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { access, lstat, readFile } from "node:fs/promises";
+import { access, lstat, readdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { TranscriptState } from "@meetless/meeting-domain";
@@ -13,7 +13,9 @@ import {
   assertProductionHostProvenance,
   registerPackagedCaptureHelper,
 } from "./production-host.js";
-import { FfmpegAudioInspector, TranscriptionService } from "./transcription-service.js";
+import { FfmpegAudioInspector, TranscriptionService, transcribeTwoSourceRecording } from "./transcription-service.js";
+import { buildSourceTimelines, type SourceTimeline, type SourceTimelines } from "./source-timeline.js";
+import { resolveTwoSourcePlan, type TwoSourceTranscriptPlan } from "./two-source-plan.js";
 import {
   DeterministicFixtureTranscriptionProvider,
   NativeOpenAiTranscriptionProvider,
@@ -438,24 +440,95 @@ async function transcribeByokRecording(
   provider: OpenAiByokTranscriptionProvider,
   input: { recordingId: string; onDurableStart(transcript: TranscriptState): void },
 ): Promise<{ transcript: TranscriptState }> {
+  const store = getMeetingStore();
   const storeRoot = requiredAbsolute("MEETLESS_STORE_ROOT");
   const staging = process.env.MEETLESS_TRANSCRIPTION_STAGING?.trim();
-  const service = new TranscriptionService(getMeetingStore(), provider, {
-    inspector: new FfmpegAudioInspector(
-      requiredAbsolute("MEETLESS_FFMPEG"),
-      requiredAbsolute("MEETLESS_FFPROBE"),
-      staging && path.isAbsolute(staging) ? staging : path.join(storeRoot, "transcription-ranges"),
-    ),
-    sourceSnapshots: new PrivateAudioSnapshotStore(path.join(storeRoot, "transcription-source-snapshots"), "transcription-source"),
-    onStateChange: (transcript) => {
-      // The coordinator's start contract resolves on the first durable
-      // pending/transcribing state, mirroring the managed dispatch.
-      if (transcript.status === "pending" || transcript.status === "transcribing") input.onDurableStart(transcript);
-    },
+  const inspector = new FfmpegAudioInspector(
+    requiredAbsolute("MEETLESS_FFMPEG"),
+    requiredAbsolute("MEETLESS_FFPROBE"),
+    staging && path.isAbsolute(staging) ? staging : path.join(storeRoot, "transcription-ranges"),
+  );
+  const sourceSnapshots = new PrivateAudioSnapshotStore(path.join(storeRoot, "transcription-source-snapshots"), "transcription-source");
+  const onStateChange = (transcript: TranscriptState) => {
+    // The coordinator's start contract resolves on the first durable
+    // pending/transcribing state, mirroring the managed dispatch.
+    if (transcript.status === "pending" || transcript.status === "transcribing") input.onDurableStart(transcript);
+  };
+  const twoSource = await prepareByokTwoSourceDispatch(store, storeRoot, input.recordingId);
+  if (twoSource) {
+    const transcript = await transcribeTwoSourceRecording(store, provider, input.recordingId, twoSource.timelines, {
+      inspector,
+      sourceSnapshots,
+      onStateChange,
+      lifecycle: meetingLifecycle,
+    });
+    if (transcript) {
+      if (transcript.status === "failed") throw new Error(transcript.failureReason ?? "BYOK transcription failed");
+      return { transcript };
+    }
+    // Null means an existing transcript follows the mixed range plan; resume
+    // it through the unchanged mixed flow below.
+  }
+  const service = new TranscriptionService(store, provider, {
+    inspector,
+    sourceSnapshots,
+    onStateChange,
   }, meetingLifecycle);
   const transcript = await service.transcribeSavedRecording(input.recordingId);
   if (transcript.status === "failed") throw new Error(transcript.failureReason ?? "BYOK transcription failed");
   return { transcript };
+}
+
+/**
+ * Speaker attribution stage A3 dispatch decision: when the recording's session
+ * committed chunks for BOTH capture sources, rebuild the per-source timeline
+ * WAVs and plan the interleaved two-source transcription. Any missing source,
+ * timeline build failure, or pre-existing mixed-plan transcript returns null
+ * so the caller keeps the byte-identical mixed-audio flow.
+ */
+async function prepareByokTwoSourceDispatch(
+  store: MeetingStore,
+  storeRoot: string,
+  recordingId: string,
+): Promise<{ timelines: { microphone: SourceTimeline; system: SourceTimeline }; plan: TwoSourceTranscriptPlan } | null> {
+  const recording = (await store.listRecordings()).find((candidate) => candidate.id === recordingId);
+  if (!recording || recording.status !== "saved" || !recording.savedOutput) return null;
+  const sessionDirectory = path.join(storeRoot, "sessions", recordingId);
+  if (!await sessionHasBothSourceChunks(sessionDirectory)) return null;
+  let timelines: SourceTimelines;
+  try {
+    timelines = await buildSourceTimelines(sessionDirectory, recordingId, { ffmpeg: requiredAbsolute("MEETLESS_FFMPEG") });
+  } catch {
+    // Derived-audio reconstruction is best effort; the saved mixed MP3 flow
+    // remains the durable fallback.
+    return null;
+  }
+  const existing = await store.getTranscriptForMeeting(recording.meetingId);
+  const plan = resolveTwoSourcePlan({
+    microphone: timelines.microphone,
+    system: timelines.system,
+    recordingId,
+    audioSha256: recording.savedOutput.sha256,
+    existingRanges: existing?.ranges ?? null,
+  });
+  if (!plan || !timelines.microphone || !timelines.system) return null;
+  return { timelines: { microphone: timelines.microphone, system: timelines.system }, plan };
+}
+
+async function sessionHasBothSourceChunks(sessionDirectory: string): Promise<boolean> {
+  let entries;
+  try {
+    entries = await readdir(sessionDirectory);
+  } catch {
+    return false;
+  }
+  let microphone = false;
+  let system = false;
+  for (const name of entries) {
+    if (name.startsWith("chunk--microphone--")) microphone = true;
+    else if (name.startsWith("chunk--system--")) system = true;
+  }
+  return microphone && system;
 }
 
 export function getCitationPlaybackService(): CitationPlaybackService {

@@ -117,3 +117,60 @@ describe("transcript policy", () => {
     });
   });
 });
+
+describe("two-source speaker attribution policy", () => {
+  const customRanges = [
+    { ordinal: 0, startMs: 0, endMs: 1_000, segmentId: "segment-mic-0" },
+    { ordinal: 1, startMs: 0, endMs: 3_000, segmentId: "segment-sys-0" },
+    { ordinal: 2, startMs: 2_000, endMs: 3_500, segmentId: "segment-mic-1" },
+  ];
+
+  test("createTranscript accepts a deterministic custom range plan and rejects ambiguous ones", () => {
+    const transcript = createTranscript({
+      meetingId: "m-2", recordingId: "r-2",
+      audio: { destination: "recordings/r-2.mp3", byteLength: 10, sha256: "two-source-sha", durationMs: 90_000 },
+      now, ranges: customRanges,
+    });
+    expect(transcript.ranges).toEqual(customRanges);
+
+    expect(() => createTranscript({
+      meetingId: "m-2", recordingId: "r-2",
+      audio: { destination: "recordings/r-2.mp3", byteLength: 10, sha256: "two-source-sha", durationMs: 90_000 },
+      now, ranges: [],
+    })).toThrow(/cannot be empty/u);
+    expect(() => createTranscript({
+      meetingId: "m-2", recordingId: "r-2",
+      audio: { destination: "recordings/r-2.mp3", byteLength: 10, sha256: "two-source-sha", durationMs: 90_000 },
+      now, ranges: [...customRanges, { ordinal: 1, startMs: 4_000, endMs: 5_000, segmentId: "segment-dup" }],
+    })).toThrow(/ordinals must be unique/u);
+  });
+
+  test("checkpoints persist trimmed speaker labels and treat blank labels as absent", () => {
+    let transcript = createTranscript({
+      meetingId: "m-2", recordingId: "r-2",
+      audio: { destination: "recordings/r-2.mp3", byteLength: 10, sha256: "two-source-sha", durationMs: 90_000 },
+      now, ranges: customRanges,
+    });
+    let request = beginTranscriptRequest(transcript, now)!;
+    transcript = checkpointTranscriptRange(request.transcript, {
+      range: request.range, attempts: request.attempt, text: "xin chào", usage: null,
+      detectedLanguages: ["vi"], speakerLabel: "  Bạn  ", now,
+    });
+    expect(transcript.checkpoints[0]!.speakerLabel).toBe("Bạn");
+
+    request = beginTranscriptRequest(transcript, now)!;
+    transcript = checkpointTranscriptRange(request.transcript, {
+      range: request.range, attempts: request.attempt, text: "meeting audio", usage: null,
+      detectedLanguages: ["vi"], speakerLabel: "   ", now,
+    });
+    expect(transcript.checkpoints[1]!.speakerLabel).toBeUndefined();
+    expect("speakerLabel" in transcript.checkpoints[1]!).toBe(false);
+
+    request = beginTranscriptRequest(transcript, now)!;
+    transcript = checkpointTranscriptRange(request.transcript, {
+      range: request.range, attempts: request.attempt, text: "more meeting audio", usage: null,
+      detectedLanguages: ["vi"], now,
+    });
+    expect(transcript.checkpoints[2]!.speakerLabel).toBeUndefined();
+  });
+});

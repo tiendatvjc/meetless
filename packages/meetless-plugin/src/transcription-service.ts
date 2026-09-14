@@ -20,6 +20,8 @@ import { TranscriptionProviderError } from "./transcription-provider.js";
 import { randomUUID } from "node:crypto";
 import { sweepOwnedAudioCandidates, type AudioSnapshotStore } from "./private-audio-snapshot.js";
 import { MeetingLifecycleCoordinator } from "./meeting-lifecycle-coordinator.js";
+import { buildTwoSourceTranscriptPlan, type TwoSourceTranscriptPlan } from "./two-source-plan.js";
+import type { SourceTimeline } from "./source-timeline.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -227,6 +229,120 @@ export class TranscriptionService {
       startedAt: null, updatedAt: new Date().toISOString(), failureReason: "Transcription failed", publication: null,
     };
   }
+}
+
+export interface TwoSourceTranscriptionDeps {
+  inspector: AudioInspector;
+  sourceSnapshots: AudioSnapshotStore;
+  onStateChange?: (transcript: TranscriptState) => void;
+  lifecycle?: MeetingLifecycleCoordinator;
+  /** Per-source window size; defaults to the standard transcript range size. */
+  rangeMs?: number;
+}
+
+/**
+ * Speaker attribution stage A3 (BYOK route): transcribe the microphone and
+ * system capture timelines separately through the same provider, range
+ * extraction, and durable checkpoint machinery as the mixed flow, sharing one
+ * transcript whose range plan interleaves both sources on the logical
+ * timeline. Each checkpoint persists the speaker label of its source.
+ *
+ * The saved mixed MP3 is still snapshotted and identity-checked so the
+ * transcript's audio identity stays exactly the one the recording published.
+ * Returns null when an existing transcript follows a different (legacy
+ * planner) range plan, so the caller falls back to the unchanged mixed flow.
+ */
+export async function transcribeTwoSourceRecording(
+  store: MeetingStore,
+  provider: TranscriptionProvider,
+  recordingId: string,
+  timelines: { microphone: SourceTimeline; system: SourceTimeline },
+  deps: TwoSourceTranscriptionDeps,
+): Promise<TranscriptState | null> {
+  if ((await store.transcriptionConsent()).status !== "granted") {
+    throw new Error("Cloud transcription consent is required");
+  }
+  const recordings = await store.listRecordings();
+  const recording = recordings.find((candidate) => candidate.id === recordingId);
+  if (!recording || recording.status !== "saved" || !recording.savedOutput) throw new Error(`Saved recording not found: ${recordingId}`);
+  if (await provider.status() !== "configured") throw new TranscriptionProviderError("Native transcription is not configured");
+  const lease = deps.lifecycle?.tryAcquireWork(recording.meetingId, "transcription");
+  if (deps.lifecycle && !lease) throw new Error("Meeting deletion is in progress");
+  const plan: TwoSourceTranscriptPlan = buildTwoSourceTranscriptPlan({
+    microphone: timelines.microphone,
+    system: timelines.system,
+    recordingId,
+    audioSha256: recording.savedOutput.sha256,
+    rangeMs: deps.rangeMs,
+  });
+  try {
+    const sourceSnapshot = await deps.sourceSnapshots.create(recording.savedOutput.destination, recording.savedOutput);
+    try {
+      const inspected = await deps.inspector.inspect(sourceSnapshot.path);
+      if (!sameIdentity(inspected.identity, recording.savedOutput)) throw new Error("Private saved MP3 snapshot identity is invalid");
+      let transcript = await store.ensureTranscript({
+        meetingId: recording.meetingId,
+        recordingId,
+        audio: { destination: recording.savedOutput.destination, ...inspected.identity, durationMs: inspected.durationMs },
+        ranges: plan.ranges,
+      });
+      if (!sameRangePlan(transcript.ranges, plan.ranges)) return null;
+      if (transcript.status === "failed" && !canRetryTranscript(transcript)) return transcript;
+      if (canRetryTranscript(transcript)) transcript = await store.retryTranscript(transcript.id);
+      for (;;) {
+        const next = await store.beginTranscriptRequest(transcript.id);
+        if (!next) {
+          if (transcript.status !== "ready" && transcript.checkpoints.length === transcript.ranges.length) transcript = await store.publishTranscript(transcript.id);
+          deps.onStateChange?.(transcript);
+          return transcript;
+        }
+        const entry = plan.entries[next.range.ordinal];
+        if (!entry) throw new Error(`Two-source plan is missing range ${next.range.ordinal} of ${recordingId}`);
+        let rangeFile: { path: string; cleanup(): Promise<void> } | null = null;
+        let result: TranscriptionResult;
+        try {
+          rangeFile = await deps.inspector.extractRange(
+            timelines[entry.source].wavPath,
+            {
+              ordinal: next.range.ordinal,
+              segmentId: next.range.segmentId,
+              startMs: entry.timelineStartMs,
+              endMs: entry.timelineEndMs,
+            },
+          );
+          const audioIdentity = await fileIdentity(rangeFile.path);
+          result = await provider.transcribe({ recordingId, audioPath: rangeFile.path, audioIdentity, range: next.range });
+        } catch (error) {
+          await rangeFile?.cleanup().catch(() => undefined);
+          transcript = await store.failTranscript(next.transcript.id, redactProviderFailure(error));
+          deps.onStateChange?.(transcript);
+          if ((transcript.attemptsByOrdinal[String(next.range.ordinal)] ?? 0) < transcript.maxAttempts) {
+            transcript = await store.retryTranscript(transcript.id);
+            continue;
+          }
+          return transcript;
+        }
+        await rangeFile?.cleanup().catch(() => undefined);
+        transcript = await store.checkpointTranscriptRange(next.transcript.id, {
+          range: next.range,
+          attempts: next.attempt,
+          text: result.text,
+          usage: result.usage,
+          detectedLanguages: result.detectedLanguages,
+          speakerLabel: entry.speakerLabel,
+        });
+        deps.onStateChange?.(transcript);
+      }
+    } finally {
+      await sourceSnapshot.cleanup().catch(() => undefined);
+    }
+  } finally {
+    lease?.release();
+  }
+}
+
+function sameRangePlan(left: readonly TranscriptRange[], right: readonly TranscriptRange[]): boolean {
+  return left.length === right.length && left.every((range, index) => JSON.stringify(range) === JSON.stringify(right[index]));
 }
 
 function sameIdentity(left: OutputIdentity, right: OutputIdentity): boolean {
