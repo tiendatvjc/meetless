@@ -46,6 +46,8 @@
     "host:linux:install": "node scripts/install-linux-host.mjs",
     "host:linux:apply": "node scripts/install-linux-host.mjs --install",
     "host:linux:uninstall": "node scripts/install-linux-host.mjs --uninstall",
+    "diarization:install": "bash scripts/linux/install-diarization.sh",
+    "diarization:check": "bash scripts/linux/install-diarization.sh --check",
     "runtime:linux:status": "systemctl --user status meetless-daemon --no-pager || true",
     "proof:linux": "npm run build:paseo && npm run build:meetless && node scripts/prove-linux-port.mjs",
     "package:linux": "node scripts/package-linux.mjs",
