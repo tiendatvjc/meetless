@@ -112,8 +112,18 @@ export function resolveTwoSourcePlan(input: {
   rangeMs?: number;
   existingRanges?: readonly TranscriptRange[] | null;
 }): TwoSourceTranscriptPlan | null {
-  if (!input.microphone || input.microphone.chunkOffsets.length === 0) return null;
-  if (!input.system || input.system.chunkOffsets.length === 0) return null;
+  if (!input.microphone || !input.system) return null;
+  // Preserved timelines (post chunk-cleanup) carry no per-chunk offsets;
+  // treat the entire WAV as a single window per source.
+  if (input.microphone.chunkOffsets.length === 0 && input.microphone.durationMs > 0) {
+    return buildTwoSourceTranscriptPlan({
+      ...input,
+      microphone: { ...input.microphone, chunkOffsets: [{ chunkId: "preserved-microphone", logicalStartMs: 0, timelineStartMs: 0, durationMs: input.microphone.durationMs }] },
+      system: { ...input.system, chunkOffsets: [{ chunkId: "preserved-system", logicalStartMs: 0, timelineStartMs: 0, durationMs: input.system.durationMs }] },
+    });
+  }
+  if (input.microphone.chunkOffsets.length === 0) return null;
+  if (input.system.chunkOffsets.length === 0) return null;
   const plan = buildTwoSourceTranscriptPlan({
     microphone: input.microphone,
     system: input.system,
