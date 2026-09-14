@@ -519,6 +519,8 @@ async function prepareByokTwoSourceDispatch(
 }
 
 async function sessionHasBothSourceChunks(sessionDirectory: string): Promise<boolean> {
+  // speaker/linux-port: chunks are cleaned after finalize; the preserved
+  // per-source timeline WAVs under source-timelines/ are the durable signal.
   let entries;
   try {
     entries = await readdir(sessionDirectory);
@@ -531,7 +533,13 @@ async function sessionHasBothSourceChunks(sessionDirectory: string): Promise<boo
     if (name.startsWith("chunk--microphone--")) microphone = true;
     else if (name.startsWith("chunk--system--")) system = true;
   }
-  return microphone && system;
+  if (microphone && system) return true;
+  try {
+    const timelines = await readdir(path.join(sessionDirectory, "source-timelines"));
+    return timelines.includes("microphone.wav") && timelines.includes("system.wav");
+  } catch {
+    return false;
+  }
 }
 
 export function getCitationPlaybackService(): CitationPlaybackService {

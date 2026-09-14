@@ -1,4 +1,5 @@
 import { readdir } from "node:fs/promises";
+import { readdirSync } from "node:fs";
 import path from "node:path";
 import type { DiarizationStatusWire } from "@meetless/meeting-contracts";
 import type { MeetingStore } from "@meetless/meeting-store";
@@ -200,5 +201,13 @@ async function sessionHasSystemChunks(sessionDirectory: string): Promise<boolean
   } catch {
     return false;
   }
-  return entries.some((name) => name.startsWith("chunk--system--"));
+  // speaker/linux-port: chunks are cleaned after finalize; the preserved
+  // system timeline WAV is the durable signal.
+  if (entries.some((name) => name.startsWith("chunk--system--"))) return true;
+  try {
+    const timelines = readdirSync(path.join(sessionDirectory, "source-timelines"));
+    return timelines.includes("system.wav");
+  } catch {
+    return false;
+  }
 }
