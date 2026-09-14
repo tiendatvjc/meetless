@@ -21,6 +21,16 @@ import type { ChatSelection, MeetingChatThread, TranscriptState } from "@meetles
 import type { MeetingStore } from "@meetless/meeting-store";
 import { z } from "zod";
 import { MeetingLifecycleCoordinator, type MeetingLifecycleLease } from "./meeting-lifecycle-coordinator.js";
+import {
+  devChatProviderControls,
+  devChatProviderOptions,
+  findDevChatProvider,
+  isDevChatProvider,
+  loadDevChatProviders,
+  loadDevChatProvidersSafe,
+  resolveDevChatProvidersPath,
+  runDevProviderTurn,
+} from "./dev-chat-provider.js";
 
 const AgentAnswerSchema = z.discriminatedUnion("outcome", [
   z.object({
@@ -466,7 +476,13 @@ export class PaseoMeetingChatAgentPort implements MeetingChatAgentPort {
         });
       }
     }
-    return { providers };
+    // Phase C1: developer-configured providers join the SAME picker, appended
+    // after the agent providers. A broken dev config degrades to "absent"
+    // rather than failing the whole catalog.
+    const devProviders = devChatProviderControls(
+      await loadDevChatProvidersSafe(resolveDevChatProvidersPath()),
+    );
+    return { providers: [...providers, ...devProviders] };
   }
 
   private async listModelsForControls(provider: string): Promise<Record<string, unknown>[]> {
@@ -549,6 +565,9 @@ export class PaseoMeetingChatAgentPort implements MeetingChatAgentPort {
 
   private async discoverFeaturesRaw(selection: ChatSelection, catalog: ChatControlsCatalogWire): Promise<ChatFeatureWire[]> {
     await this.validateAgainstCatalog(selection, catalog);
+    // Dev providers are direct LLM endpoints: no modes, no thinking options, no
+    // feature discovery — an explicit empty feature list keeps them "ready".
+    if (isDevChatProvider(selection.provider)) return [];
     const actions = this.paseo.providers as unknown as {
       listFeatures?: (draft: Record<string, unknown>, options?: { requestId?: string }) => Promise<unknown>;
     };
@@ -599,7 +618,7 @@ export class PaseoMeetingChatAgentPort implements MeetingChatAgentPort {
     const snapshot = await this.paseo.providers.waitForReady({ cwd: this.executionRoot });
     const entries = snapshot.entries ?? [];
     const available = entries.filter((entry) => entry.enabled && entry.status === "ready");
-    return Promise.all(available.map(async (entry) => {
+    const agentProviders = await Promise.all(available.map(async (entry) => {
       const result = entry.models?.length
         ? { models: entry.models }
         : await this.paseo.providers.listModels(entry.provider, { cwd: this.executionRoot });
@@ -614,9 +633,27 @@ export class PaseoMeetingChatAgentPort implements MeetingChatAgentPort {
         })),
       };
     })).then((providers) => providers.filter((provider) => provider.models.length > 0));
+    return [...agentProviders, ...devChatProviderOptions(
+      await loadDevChatProvidersSafe(resolveDevChatProvidersPath()),
+    )];
   }
 
   async execute(input: ChatExecutionInput): Promise<AgentAnswer> {
+    // Phase C1: developer-configured OpenAI-compatible providers run through
+    // the built-in turn runner (transcript inlined, same answer contract)
+    // instead of the Paseo agent runtime. Selection plumbing is shared: both
+    // the legacy ask path and askWithSelection land here.
+    const providerId = input.selection ? input.selection.provider : input.provider;
+    if (isDevChatProvider(providerId)) {
+      const providers = await loadDevChatProviders(resolveDevChatProvidersPath());
+      const provider = findDevChatProvider(providers, providerId);
+      if (!provider) throw new Error(`Meeting chat execution failed: dev chat provider is no longer configured: ${providerId}`);
+      try {
+        return await runDevProviderTurn(input, provider);
+      } catch (error) {
+        throw new Error(`Meeting chat execution failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     const selection = input.selection
       ? await this.validateSelection(input.selection)
       : {
