@@ -74,8 +74,11 @@ export class TranscriptionRouteCoordinator {
       return { recording: evidence, transcript, transcription: this.state("completed") };
     }
     if (this.running.has(recording.id)) return { recording: evidence, transcript, transcription: this.state("started") };
+    // linux-port/BYOK: with a configured user key, status must not run the
+    // managed/native recovery or surface its exhaustion state either.
+    const byokStatusReady = this.byok !== undefined && (await this.byok.status()) === "configured";
     // A durable pending transcript alone does not establish a live dispatcher.
-    if (transcript && this.managed.resumeExisting) {
+    if (!byokStatusReady && transcript && this.managed.resumeExisting) {
       try {
         transcript = await this.recoverExisting(recording.id) ?? transcript;
       } catch (error) {
@@ -88,8 +91,8 @@ export class TranscriptionRouteCoordinator {
     if (transcript?.status === "ready") return { recording: evidence, transcript, transcription: this.state("completed") };
     if (transcript?.status === "failed") {
       const failure = transcriptionFailure(transcript.quotaFailure ? { quotaFailure: transcript.quotaFailure } : transcript.failureReason);
-      const retry = canRetryTranscript(transcript);
-      return { recording: evidence, transcript, transcription: this.state("failed", retry, retry ? failure.category : "retry_exhausted", retry ? failure.message : "No further transcription retries are available for this recording. The saved audio remains local.") };
+      const retry = byokStatusReady || canRetryTranscript(transcript);
+      return { recording: evidence, transcript, transcription: this.state("failed", retry, retry ? (byokStatusReady ? null : failure.category) : "retry_exhausted", retry ? (byokStatusReady ? "Select Transcribe to retry with your OpenAI key." : failure.message) : "No further transcription retries are available for this recording. The saved audio remains local.") };
     }
     const previous = this.failures.get(recording.id);
     return { recording: evidence, transcript, transcription: previous ?? (transcript
