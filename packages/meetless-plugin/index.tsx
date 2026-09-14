@@ -12,6 +12,9 @@ import {
   MeetingCitationResolveRpc,
   MeetingCreateRpc,
   MeetingDeleteRpc,
+  MeetingDiarizationRenameRpc,
+  MeetingDiarizationRunRpc,
+  MeetingDiarizationStatusRpc,
   MeetingListRpc,
   MeetingPremiumOperationRpc,
   MeetingPremiumPurchaseRpc,
@@ -79,7 +82,9 @@ export default function contribute(plugin: PluginContext) {
       meeting,
       recording: status.recording,
       transcription: status.transcription,
-      transcript: status.transcript ? toTranscriptWire(status.transcript) : null,
+      transcript: status.transcript
+        ? toTranscriptWire(status.transcript, await server.transcriptSpeakerLabelOverlay(meetingId))
+        : null,
       consent,
       provider: { status: "configured" as const },
     };
@@ -93,8 +98,34 @@ export default function contribute(plugin: PluginContext) {
       outcome: result.outcome,
       retryEligible: result.retryEligible,
       failureCategory: result.failureCategory,
-      transcript: result.transcript ? toTranscriptWire(result.transcript) : null,
+      transcript: result.transcript
+        ? toTranscriptWire(result.transcript, await overlayOf(server, meetingId))
+        : null,
       message: result.message,
+    };
+  });
+  plugin.handle(MeetingDiarizationStatusRpc, async ({ meetingId }) => {
+    const server = await (testLoadServerByContext.get(plugin) ?? (() => import("./src/server.js")))();
+    return server.meetingDiarizationStatus(meetingId);
+  });
+  plugin.handle(MeetingDiarizationRunRpc, async ({ meetingId }) => {
+    const server = await (testLoadServerByContext.get(plugin) ?? (() => import("./src/server.js")))();
+    const result = await server.runMeetingDiarization(meetingId);
+    return {
+      status: result.status,
+      transcript: result.transcript
+        ? toTranscriptWire(result.transcript, await overlayOf(server, meetingId))
+        : null,
+    };
+  });
+  plugin.handle(MeetingDiarizationRenameRpc, async ({ meetingId, names }) => {
+    const server = await (testLoadServerByContext.get(plugin) ?? (() => import("./src/server.js")))();
+    const result = await server.renameMeetingDiarizationSpeakers(meetingId, names);
+    return {
+      status: result.status,
+      transcript: result.transcript
+        ? toTranscriptWire(result.transcript, await overlayOf(server, meetingId))
+        : null,
     };
   });
   plugin.handle(MeetingCitationResolveRpc, async ({ meetingId, segmentId }) => {
@@ -186,7 +217,20 @@ export default function contribute(plugin: PluginContext) {
   };
 }
 
-function toTranscriptWire(transcript: import("@meetless/meeting-domain").TranscriptState) {
+function overlayOf(
+  server: typeof import("./src/server.js"),
+  meetingId: string,
+): Promise<Map<string, string>> {
+  // Test loaders may not implement the overlay seam; absence means no labels.
+  return typeof server.transcriptSpeakerLabelOverlay === "function"
+    ? server.transcriptSpeakerLabelOverlay(meetingId)
+    : Promise.resolve(new Map());
+}
+
+function toTranscriptWire(
+  transcript: import("@meetless/meeting-domain").TranscriptState,
+  overlay?: Map<string, string>,
+) {
   return {
     id: transcript.id,
     meetingId: transcript.meetingId,
@@ -195,13 +239,19 @@ function toTranscriptWire(transcript: import("@meetless/meeting-domain").Transcr
     plannerVersion: transcript.plannerVersion,
     audioDurationMs: transcript.audio.durationMs,
     ranges: transcript.ranges,
-    segments: transcript.checkpoints.map((checkpoint) => ({
-      range: checkpoint.range,
-      text: checkpoint.text,
-      completedAt: checkpoint.completedAt,
-      detectedLanguages: checkpoint.detectedLanguages,
-      ...(checkpoint.speakerLabel ? { speakerLabel: checkpoint.speakerLabel } : {}),
-    })),
+    segments: transcript.checkpoints.map((checkpoint) => {
+      // The diarization overlay refines system-side labels; the microphone
+      // side ("Bạn") and unlabeled legacy segments only gain labels when the
+      // overlay has an entry for the exact segment id.
+      const speakerLabel = overlay?.get(checkpoint.range.segmentId) ?? checkpoint.speakerLabel;
+      return {
+        range: checkpoint.range,
+        text: checkpoint.text,
+        completedAt: checkpoint.completedAt,
+        detectedLanguages: checkpoint.detectedLanguages,
+        ...(speakerLabel ? { speakerLabel } : {}),
+      };
+    }),
     requestCount: transcript.requestCount,
     usage: transcript.usage,
     detectedLanguages: transcript.detectedLanguages,

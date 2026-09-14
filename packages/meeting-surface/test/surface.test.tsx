@@ -1253,7 +1253,102 @@ describe("responsive meeting sidebar and transcript detail", () => {
     expect(systemChip.findByProps({ children: "Cuộc họp" })).toBeTruthy();
     // The first segment carries no speakerLabel, so no chip renders for it.
     expect(renderer!.root.findAllByProps({ testID: "speaker-chip-segment-1" })).toHaveLength(0);
-    await act(async () => { renderer!.unmount(); });
+    await act(async () => renderer!.unmount());
+  });
+
+  test("diarization button stays hidden without status and runs through the handler", async () => {
+    const run = vi.fn(async () => undefined);
+    let renderer: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(
+        <MeetingListSurface selectedRecording={{ recordingId: "r-selected", status: "saved" }}
+          canCreate={false}
+          compact
+          connectionLabel="Connected"
+          hostLabel="isolated host"
+          meetings={[meeting("m-1")]}
+          onRefresh={async () => undefined}
+          selectedMeetingId="m-1"
+          transcript={transcript("ready")}
+          consentStatus="granted"
+          onRunDiarization={run}
+        />,
+      );
+    });
+    expect(renderer!.root.findAllByProps({ testID: "diarization-panel" })).toHaveLength(0);
+    await act(async () => renderer!.unmount());
+  });
+
+  test("diarization panel runs, shows progress, install hints, and speaker renames", async () => {
+    const run = vi.fn(async () => undefined);
+    const rename = vi.fn(async () => undefined);
+    const base = {
+      meetingId: "m-1",
+      available: true,
+      unavailableReason: null,
+      eligible: true,
+      applied: false,
+      running: false,
+      progress: 0,
+      speakers: [],
+    } as const;
+    const props = {
+      canCreate: false,
+      compact: true,
+      connectionLabel: "Connected",
+      hostLabel: "isolated host",
+      meetings: [meeting("m-1")],
+      onRefresh: async () => undefined,
+      selectedMeetingId: "m-1",
+      selectedRecording: { recordingId: "r-selected", status: "saved" as const },
+      transcript: transcript("ready"),
+      consentStatus: "granted" as const,
+      onRunDiarization: run,
+      onRenameDiarizationSpeaker: rename,
+    };
+
+    let renderer: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(<MeetingListSurface {...props} diarization={base} />);
+    });
+    const button = renderer!.root.findByProps({ testID: "diarization-run" });
+    expect(button.findByType("Text").props.children).toBe("Nhận diện người nói");
+    await act(async () => { await button.props.onPress(); });
+    expect(run).toHaveBeenCalledOnce();
+
+    // Running state replaces the button with live progress copy.
+    await act(async () => {
+      renderer!.update(<MeetingListSurface {...props} diarization={{ ...base, running: true, progress: 0.42 }} />);
+    });
+    expect(renderer!.root.findByProps({ testID: "diarization-progress" }).props.children).toBe("Đang nhận diện… 42%");
+    expect(renderer!.root.findAllByProps({ testID: "diarization-run" })).toHaveLength(0);
+
+    // Applied state shows the rename rows; saving carries the typed name.
+    const applied = { ...base, applied: true, speakers: [{ id: "S1", name: "Người 1" }, { id: "S2", name: "Người 2" }] };
+    await act(async () => {
+      renderer!.update(<MeetingListSurface {...props} diarization={applied} />);
+    });
+    expect(renderer!.root.findByProps({ testID: "diarization-run" }).findByType("Text").props.children).toBe("Nhận diện lại");
+    const input = renderer!.root.findByProps({ testID: "diarization-name-S1" });
+    await act(async () => { input.props.onChangeText("Lan"); });
+    await act(async () => { await renderer!.root.findByProps({ testID: "diarization-rename-S1" }).props.onPress(); });
+    expect(rename).toHaveBeenCalledWith("S1", "Lan");
+
+    // Unavailable providers keep the button but add the setup hint.
+    await act(async () => {
+      renderer!.update(<MeetingListSurface {...props} diarization={{ ...applied, available: false, unavailableReason: "not_installed" }} />);
+    });
+    expect(renderer!.root.findByProps({ testID: "diarization-hint-not-installed" }).props.children)
+      .toBe("Chưa cài diarization — chạy: npm run diarization:install");
+    expect(renderer!.root.findByProps({ testID: "diarization-run" }).props.accessibilityState.disabled).toBe(true);
+
+    await act(async () => {
+      renderer!.update(<MeetingListSurface {...props} diarization={{ ...base, available: false, unavailableReason: "token_missing" }} diarizationError="Nhận diện người nói thất bại." />);
+    });
+    expect(renderer!.root.findByProps({ testID: "diarization-hint-token" }).props.children)
+      .toBe("Thiếu HF token — lưu token tại ~/.local/share/meetless/tools/pyannote/hf-token");
+    expect(renderer!.root.findByProps({ testID: "diarization-error" }).props.children).toBe("Nhận diện người nói thất bại.");
+    await act(async () => renderer!.unmount());
   });
 
   test("renders every ready segment once and timestamp presses carry only stable identity", async () => {

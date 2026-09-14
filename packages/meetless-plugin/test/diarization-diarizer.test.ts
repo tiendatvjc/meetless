@@ -41,6 +41,12 @@ if (behavior === "error") fail(3, "DIARIZE_ERROR: model khong tai duoc");
 if (behavior === "hang") {
   process.stderr.write(JSON.stringify({ progress: 0.1 }) + "\\n");
   setInterval(() => {}, 1000);
+} else if (behavior === "garbage") {
+  process.stderr.write(JSON.stringify({ progress: 0.5 }) + "\\n");
+  writeFileSync(out, "{ not json at all");
+} else if (behavior === "bad-turns") {
+  process.stderr.write(JSON.stringify({ progress: 0.5 }) + "\\n");
+  writeFileSync(out, JSON.stringify({ turns: [{ speaker: "", startMs: -5, endMs: 0 }] }));
 } else {
   process.stderr.write(JSON.stringify({ progress: 0 }) + "\\n");
   process.stderr.write(JSON.stringify({ progress: 0.5 }) + "\\n");
@@ -54,7 +60,7 @@ if (behavior === "hang") {
 }
 `;
 
-async function fakeSidecar(root: string, behavior: "ok" | "token" | "error" | "hang", withToken: boolean) {
+async function fakeSidecar(root: string, behavior: "ok" | "token" | "error" | "hang" | "garbage" | "bad-turns", withToken: boolean) {
   const toolsRoot = path.join(root, "tools", "pyannote");
   await mkdir(path.join(toolsRoot, "bin"), { recursive: true });
   // The "python" is node itself; the "script" is the fake sidecar module.
@@ -115,6 +121,24 @@ describe("diarizer sidecar runner", () => {
       killGraceMs: 400,
     })).rejects.toBeInstanceOf(DiarizerTimeoutError);
     expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  test("rejects an rc 0 sidecar whose output is not valid JSON", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "meetless-diarizer-garbage-"));
+    roots.add(root);
+    const paths = await fakeSidecar(root, "garbage", true);
+    const failure = runDiarizationSidecar({ paths, audio: path.join(root, "system.wav") });
+    await expect(failure).rejects.toBeInstanceOf(DiarizerSidecarError);
+    await expect(failure).rejects.toThrow("not valid JSON");
+  });
+
+  test("rejects an rc 0 sidecar whose output breaks the turns contract", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "meetless-diarizer-bad-turns-"));
+    roots.add(root);
+    const paths = await fakeSidecar(root, "bad-turns", true);
+    const failure = runDiarizationSidecar({ paths, audio: path.join(root, "system.wav") });
+    await expect(failure).rejects.toBeInstanceOf(DiarizerSidecarError);
+    await expect(failure).rejects.toThrow("does not match the turns contract");
   });
 });
 

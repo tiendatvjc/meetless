@@ -18,3 +18,4 @@ native/**/.build/
 
 .env.local
 .superpowers/
+__pycache__/

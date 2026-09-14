@@ -59,6 +59,8 @@ import {
 import { TranscriptionRouteCoordinator, type TranscriptionByokRoute, type TranscriptionPremiumAccess } from "./transcription-route.js";
 import { OpenAiByokTranscriptionProvider } from "./openai-byok-provider.js";
 import { LinuxNoopPremiumAccess } from "./linux-premium-access.js";
+import { PyannoteDiarizerProvider } from "./diarization/pyannote-provider.js";
+import { MeetingDiarizationService, readSpeakerLabelOverlay } from "./diarization/meeting-diarization.js";
 
 let store: MeetingStore | null = null;
 let recordingService: RecordingService | null = null;
@@ -74,6 +76,7 @@ let managedCredentialSource: ConvexManagedCredentialSource | null = null;
 let transcriptionRoute: TranscriptionRouteCoordinator | null = null;
 let byokProvider: OpenAiByokTranscriptionProvider | null = null;
 let byokProviderConfigPath: string | null = null;
+let diarizationService: MeetingDiarizationService | null = null;
 const meetingLifecycle = new MeetingLifecycleCoordinator();
 
 export async function deleteMeetingSafely(
@@ -546,6 +549,56 @@ export function getCitationPlaybackService(): CitationPlaybackService {
     ),
   );
   return citationPlaybackService;
+}
+
+/**
+ * Speaker diarization stage B4 service: the pyannote provider over the system
+ * capture timeline, persisting an idempotent attribution overlay per meeting.
+ * Registered on every platform; availability reports not_installed where the
+ * uv venv never ran (darwin).
+ */
+export function getMeetingDiarizationService(): MeetingDiarizationService {
+  if (diarizationService) return diarizationService;
+  diarizationService = new MeetingDiarizationService({
+    storeRoot: requiredAbsolute("MEETLESS_STORE_ROOT"),
+    store: getMeetingStore(),
+    provider: new PyannoteDiarizerProvider(),
+    ffmpeg: requiredAbsolute("MEETLESS_FFMPEG"),
+    lifecycle: meetingLifecycle,
+  });
+  return diarizationService;
+}
+
+/** Test seam for the contribution layer; production always builds the pyannote provider. */
+export function setMeetingDiarizationServiceForTest(service: MeetingDiarizationService | null): void {
+  diarizationService = service;
+}
+
+export function meetingDiarizationStatus(meetingId: string): Promise<import("@meetless/meeting-contracts").DiarizationStatusWire> {
+  return getMeetingDiarizationService().status(meetingId);
+}
+
+export function runMeetingDiarization(meetingId: string): Promise<import("./diarization/meeting-diarization.js").MeetingDiarizationOutcome> {
+  return getMeetingDiarizationService().run(meetingId);
+}
+
+export function renameMeetingDiarizationSpeakers(
+  meetingId: string,
+  names: Readonly<Record<string, string>>,
+): Promise<import("./diarization/meeting-diarization.js").MeetingDiarizationOutcome> {
+  return getMeetingDiarizationService().rename(meetingId, names);
+}
+
+/**
+ * Transcript wire overlay applied on reads; deliberately never throws so a
+ * missing or unreadable diarization overlay cannot break transcript access.
+ */
+export async function transcriptSpeakerLabelOverlay(meetingId: string): Promise<Map<string, string>> {
+  try {
+    return await readSpeakerLabelOverlay(requiredAbsolute("MEETLESS_STORE_ROOT"), meetingId);
+  } catch {
+    return new Map();
+  }
 }
 
 export async function transcriptionProviderStatus(): Promise<"configured" | "missing" | "invalid"> {

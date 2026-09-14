@@ -163,6 +163,61 @@ export const MeetingTranscriptionConsentRpc = defineRpc({
   }).strict(),
 });
 
+/** One diarization speaker with its current display name ("Người 1" by default). */
+export const DiarizationSpeakerWireSchema = z.object({
+  id: z.string().trim().min(1),
+  name: z.string().trim().min(1).max(80),
+}).strict();
+
+export type DiarizationSpeakerWire = z.infer<typeof DiarizationSpeakerWireSchema>;
+
+export const DiarizationUnavailableReasonWireSchema = z.enum(["not_installed", "token_missing"]);
+export type DiarizationUnavailableReasonWire = z.infer<typeof DiarizationUnavailableReasonWireSchema>;
+
+export const DiarizationStatusWireSchema = z.object({
+  meetingId: z.string().trim().min(1),
+  /** Provider probe: venv + sidecar + token, false with a reason otherwise. */
+  available: z.boolean(),
+  unavailableReason: DiarizationUnavailableReasonWireSchema.nullable(),
+  /** A saved recording with system chunks and a ready transcript exist. */
+  eligible: z.boolean(),
+  /** A diarization attribution is durably stored for this meeting. */
+  applied: z.boolean(),
+  running: z.boolean(),
+  progress: z.number().min(0).max(1),
+  speakers: z.array(DiarizationSpeakerWireSchema),
+}).strict();
+
+export type DiarizationStatusWire = z.infer<typeof DiarizationStatusWireSchema>;
+
+export const MeetingDiarizationStatusRpc = defineRpc({
+  name: "meeting.diarization.status",
+  input: z.object({ meetingId: z.string().trim().min(1) }).strict(),
+  output: DiarizationStatusWireSchema,
+});
+
+export const MeetingDiarizationRunRpc = defineRpc({
+  name: "meeting.diarization.run",
+  input: z.object({ meetingId: z.string().trim().min(1) }).strict(),
+  output: z.object({
+    status: DiarizationStatusWireSchema,
+    transcript: TranscriptWireSchema.nullable(),
+  }).strict(),
+});
+
+export const MeetingDiarizationRenameRpc = defineRpc({
+  name: "meeting.diarization.rename",
+  input: z.object({
+    meetingId: z.string().trim().min(1),
+    /** Speaker id → new display name; unknown ids are ignored. */
+    names: z.record(z.string().trim().min(1), z.string().trim().min(1).max(80)),
+  }).strict(),
+  output: z.object({
+    status: DiarizationStatusWireSchema,
+    transcript: TranscriptWireSchema.nullable(),
+  }).strict(),
+});
+
 export const MeetingCitationResolveRpc = defineRpc({
   name: "meeting.citation.resolve",
   input: z.object({ meetingId: z.string().trim().min(1), segmentId: z.string().trim().min(1) }).strict(),

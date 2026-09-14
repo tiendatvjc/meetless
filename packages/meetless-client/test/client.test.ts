@@ -92,6 +92,60 @@ describe("Meetless capability gate", () => {
     await expect(client.grantTranscriptionConsent("m-1")).rejects.toThrow();
   });
 
+  test("routes diarization status, run, and rename RPCs with strict outputs", async () => {
+    const status = {
+      meetingId: "m-1",
+      available: true,
+      unavailableReason: null,
+      eligible: true,
+      applied: false,
+      running: false,
+      progress: 0,
+      speakers: [],
+    };
+    const transcript = {
+      id: "transcript-r-1",
+      meetingId: "m-1",
+      recordingId: "r-1",
+      status: "ready" as const,
+      plannerVersion: "m3-range-v1" as const,
+      audioDurationMs: 2_000,
+      ranges: [{ ordinal: 0, startMs: 0, endMs: 2_000, segmentId: "segment-di-0" }],
+      segments: [{
+        range: { ordinal: 0, startMs: 0, endMs: 2_000, segmentId: "segment-di-0" },
+        text: "hello",
+        completedAt: "2026-09-14T10:00:00.000Z",
+        detectedLanguages: ["vi"],
+        speakerLabel: "Người 1",
+      }],
+      requestCount: 1,
+      usage: null,
+      detectedLanguages: ["vi"],
+      failureReason: null,
+    };
+    const applied = { ...status, applied: true, speakers: [{ id: "S1", name: "Người 1" }] };
+    const renamed = { ...applied, speakers: [{ id: "S1", name: "Renamed Speaker" }] };
+    const invokePluginRpc = vi.fn(async (_id: string, method: string) => {
+      if (method === "meeting.diarization.status") return status;
+      if (method === "meeting.diarization.run") return { status: applied, transcript };
+      return { status: renamed, transcript };
+    });
+    const client = new MeetlessClient(daemon({ invokePluginRpc }));
+    await client.initialize();
+
+    await expect(client.getMeetingDiarizationStatus("m-1")).resolves.toEqual(status);
+    await expect(client.runMeetingDiarization("m-1")).resolves.toEqual({ status: applied, transcript });
+    await expect(client.renameMeetingDiarizationSpeakers("m-1", { S1: "Renamed Speaker" }))
+      .resolves.toMatchObject({ status: renamed, transcript, speakers: renamed.speakers });
+    expect(invokePluginRpc).toHaveBeenLastCalledWith("meetless", "meeting.diarization.rename", {
+      meetingId: "m-1",
+      names: { S1: "Renamed Speaker" },
+    });
+    const calls = invokePluginRpc.mock.calls.length;
+    await expect(client.runMeetingDiarization("")).rejects.toThrow();
+    expect(invokePluginRpc).toHaveBeenCalledTimes(calls);
+  });
+
   test("routes strict chat discovery, durable get, ask, and retry RPCs", async () => {
     const thread = {
       meetingId: "m-1", status: "running" as const,

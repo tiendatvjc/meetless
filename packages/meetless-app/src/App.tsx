@@ -22,6 +22,7 @@ import {
 } from "@meetless/meeting-contracts";
 import type {
   CitationWire,
+  DiarizationStatusWire,
   TranscriptWire,
   TranscriptionProviderStatusWire,
   TranscriptionRouteOutcomeWire,
@@ -53,6 +54,7 @@ function logPremiumDiagnostic(stage: PremiumDiagnosticStage, outcome: PremiumDia
 export const PREMIUM_UI_PENDING_TIMEOUT_MS = 30_000;
 const PREMIUM_STATUS_POLL_INTERVAL_MS = 250;
 const TRANSCRIPTION_STATUS_POLL_INTERVAL_MS = 500;
+const DIARIZATION_STATUS_POLL_INTERVAL_MS = 2_000;
 
 type PremiumRpcResult<T> = { timedOut: false; value: T } | { timedOut: true };
 
@@ -149,6 +151,8 @@ export function AppContent({ mode }: { mode: "desktop" | "companion" }) {
   const [transcriptionFailureCategory, setTranscriptionFailureCategory] = useState<TranscriptionFailureCategoryWire | null>(null);
   const [transcriptionRouteMessage, setTranscriptionRouteMessage] = useState<string | null>(null);
   const [transcriptionConsentPending, setTranscriptionConsentPending] = useState(false);
+  const [diarization, setDiarization] = useState<DiarizationStatusWire | null>(null);
+  const [diarizationError, setDiarizationError] = useState<string | null>(null);
   const [chatControls, setChatControls] = useState<ChatControlsWire | null>(null);
   const [chatSelection, setChatSelection] = useState<ChatSelectionWire | null>(null);
   const [chatFeatures, setChatFeatures] = useState<ChatFeatureDiscoveryWire | null>(null);
@@ -174,6 +178,7 @@ export function AppContent({ mode }: { mode: "desktop" | "companion" }) {
   const selectedMeetingIdRef = useRef<string | null>(null);
   const transcriptionConsentOperation = useRef(0);
   const transcriptionConsentPendingRef = useRef(false);
+  const diarizationRunPendingRef = useRef(false);
   const premiumOperationSequence = useRef(0);
   const premiumOperation = useRef<{ token: number; action: PremiumPendingAction } | null>(null);
   const deletePendingRef = useRef(false);
@@ -213,6 +218,9 @@ export function AppContent({ mode }: { mode: "desktop" | "companion" }) {
     transcriptionConsentOperation.current += 1;
     transcriptionConsentPendingRef.current = false;
     setTranscriptionConsentPending(false);
+    diarizationRunPendingRef.current = false;
+    setDiarization(null);
+    setDiarizationError(null);
     setSelectedRecording(null);
     setTranscriptionRetryEligible(false);
     setTranscriptionFailureCategory(null);
@@ -433,6 +441,9 @@ export function AppContent({ mode }: { mode: "desktop" | "companion" }) {
     setTranscriptionRouteMessage(null);
     transcriptionConsentPendingRef.current = false;
     setTranscriptionConsentPending(false);
+    diarizationRunPendingRef.current = false;
+    setDiarization(null);
+    setDiarizationError(null);
     setChatControls(null);
     setChatThread(null);
     setChatLoading(false);
@@ -452,6 +463,14 @@ export function AppContent({ mode }: { mode: "desktop" | "companion" }) {
       setTranscriptionFailureCategory(result.transcription.failureCategory);
       if (result.transcript?.status === "ready") {
         setTranscriptionRouteOutcome("completed");
+        if (typeof active.client.getMeetingDiarizationStatus === "function") {
+          // Best-effort: an older host without diarization simply hides the controls.
+          active.client.getMeetingDiarizationStatus(meetingId)
+            .then((status) => {
+              if (isCurrentConnection(active) && selectedMeetingIdRef.current === meetingId) setDiarization(status);
+            })
+            .catch(() => undefined);
+        }
         await loadTranscriptChat(active, meetingId, version, controlsSelectionRequest);
       }
     } catch (reason) {
@@ -484,11 +503,69 @@ export function AppContent({ mode }: { mode: "desktop" | "companion" }) {
     transcriptionConsentOperation.current += 1;
     transcriptionConsentPendingRef.current = false;
     setTranscriptionConsentPending(false);
+    diarizationRunPendingRef.current = false;
+    setDiarization(null);
+    setDiarizationError(null);
     setChatControls(null);
     setChatThread(null);
     setChatLoading(false);
     setChatError(null);
   }, []);
+
+  const runDiarization = useCallback(async () => {
+    const active = connection.current;
+    const meetingId = selectedMeetingIdRef.current;
+    if (!active || !meetingId || diarizationRunPendingRef.current) return;
+    if (typeof active.client.runMeetingDiarization !== "function") return;
+    diarizationRunPendingRef.current = true;
+    setDiarizationError(null);
+    setDiarization((current) => current ? { ...current, running: true, progress: 0 } : current);
+    try {
+      const result = await active.client.runMeetingDiarization(meetingId);
+      if (!isCurrentConnection(active) || selectedMeetingIdRef.current !== meetingId) return;
+      setDiarization(result.status);
+      if (result.transcript) setTranscript(result.transcript);
+    } catch {
+      if (isCurrentConnection(active) && selectedMeetingIdRef.current === meetingId) {
+        setDiarizationError("Nhận diện người nói thất bại. Thử lại.");
+      }
+    } finally {
+      diarizationRunPendingRef.current = false;
+      if (isCurrentConnection(active) && selectedMeetingIdRef.current === meetingId) {
+        setDiarization((current) => current ? { ...current, running: false } : current);
+      }
+    }
+  }, [isCurrentConnection]);
+
+  const renameDiarizationSpeaker = useCallback(async (speakerId: string, name: string) => {
+    const active = connection.current;
+    const meetingId = selectedMeetingIdRef.current;
+    if (!active || !meetingId || typeof active.client.renameMeetingDiarizationSpeakers !== "function") return;
+    try {
+      const result = await active.client.renameMeetingDiarizationSpeakers(meetingId, { [speakerId]: name });
+      if (!isCurrentConnection(active) || selectedMeetingIdRef.current !== meetingId) return;
+      setDiarization(result.status);
+      if (result.transcript) setTranscript(result.transcript);
+    } catch {
+      throw new Error("Speaker rename failed");
+    }
+  }, [isCurrentConnection]);
+
+  // Poll the host-side run state so the progress copy tracks the sidecar.
+  useEffect(() => {
+    if (!diarization?.running || !selectedMeetingId) return;
+    const meetingId = selectedMeetingId;
+    const active = connection.current;
+    if (!active || typeof active.client.getMeetingDiarizationStatus !== "function") return;
+    const timer = setInterval(() => {
+      active.client.getMeetingDiarizationStatus(meetingId)
+        .then((status) => {
+          if (isCurrentConnection(active) && selectedMeetingIdRef.current === meetingId) setDiarization(status);
+        })
+        .catch(() => undefined);
+    }, DIARIZATION_STATUS_POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [diarization?.running, isCurrentConnection, selectedMeetingId]);
 
   const requestDeleteMeeting = useCallback((meetingId: string) => {
     if (deletePending || selectedMeetingIdRef.current !== meetingId) return;
@@ -1158,6 +1235,10 @@ export function AppContent({ mode }: { mode: "desktop" | "companion" }) {
         transcriptionConsentPending={transcriptionConsentPending}
         onGrantTranscriptionConsent={interactive ? grantConsent : undefined}
         onRetryTranscription={interactive && consentStatus === "granted" ? grantConsent : undefined}
+        diarization={diarization}
+        diarizationError={diarizationError}
+        onRunDiarization={interactive ? runDiarization : undefined}
+        onRenameDiarizationSpeaker={interactive ? renameDiarizationSpeaker : undefined}
         onCitation={interactive ? playCitation : undefined}
         citationEvidence={citationEvidence}
         chatCatalog={chatControls?.catalog}

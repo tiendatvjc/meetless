@@ -23,6 +23,7 @@ import type {
   ChatProviderWire,
   ChatSelectionWire,
   CitationWire,
+  DiarizationStatusWire,
   MeetingChatThreadWire,
   MeetingWire,
   ManagedDeviceWire,
@@ -538,6 +539,11 @@ export interface MeetingListSurfaceProps {
   onBack?(): void;
   onGrantTranscriptionConsent?(): Promise<void>;
   onRetryTranscription?(): Promise<void>;
+  /** Speaker diarization (stage B4); null keeps the transcript surface unchanged. */
+  diarization?: DiarizationStatusWire | null;
+  diarizationError?: string | null;
+  onRunDiarization?(): Promise<void>;
+  onRenameDiarizationSpeaker?(speakerId: string, name: string): Promise<void>;
   onCitation?(citation: Pick<CitationWire, "meetingId" | "segmentId">): void | Promise<void>;
   citationEvidence?: CitationEvidenceState | null;
   chatCatalog?: ChatControlsCatalogWire;
@@ -609,6 +615,10 @@ export function MeetingListSurface({
   onBack,
   onGrantTranscriptionConsent,
   onRetryTranscription,
+  diarization = null,
+  diarizationError = null,
+  onRunDiarization,
+  onRenameDiarizationSpeaker,
   onCitation,
   citationEvidence = null,
   chatCatalog,
@@ -730,6 +740,10 @@ export function MeetingListSurface({
       onChatSelectionBundle={onChatSelectionBundle}
       onGrantTranscriptionConsent={onGrantTranscriptionConsent}
       onRetryTranscription={onRetryTranscription}
+      diarization={diarization}
+      diarizationError={diarizationError}
+      onRunDiarization={onRunDiarization}
+      onRenameDiarizationSpeaker={onRenameDiarizationSpeaker}
       pending={pending}
       providerStatus={providerStatus}
       selectedRecording={selectedRecording}
@@ -1282,6 +1296,10 @@ interface MeetingDetailProps {
   onChatSelectionBundle?: (selection: ChatSelectionWire) => void | Promise<void>;
   onGrantTranscriptionConsent?: () => Promise<void>;
   onRetryTranscription?: () => Promise<void>;
+  diarization?: DiarizationStatusWire | null;
+  diarizationError?: string | null;
+  onRunDiarization?: () => Promise<void>;
+  onRenameDiarizationSpeaker?(speakerId: string, name: string): Promise<void>;
   pending: boolean;
   providerStatus?: TranscriptionProviderStatusWire["status"];
   selectedRecording?: SelectedRecordingWire | null;
@@ -1335,6 +1353,10 @@ function MeetingDetail(props: MeetingDetailProps) {
     onChatSelectionBundle,
     onGrantTranscriptionConsent,
     onRetryTranscription,
+    diarization,
+    diarizationError,
+    onRunDiarization,
+    onRenameDiarizationSpeaker,
     pending,
     providerStatus,
     selectedRecording,
@@ -1440,6 +1462,10 @@ function MeetingDetail(props: MeetingDetailProps) {
             consentStatus={consentStatus}
             onGrantTranscriptionConsent={onGrantTranscriptionConsent}
             onRetryTranscription={onRetryTranscription}
+            diarization={diarization}
+            diarizationError={diarizationError}
+            onRunDiarization={onRunDiarization}
+            onRenameDiarizationSpeaker={onRenameDiarizationSpeaker}
             pending={pending}
             providerStatus={providerStatus}
             selectedRecording={selectedRecording}
@@ -1623,6 +1649,10 @@ function TranscriptPane({
   transcriptionRouteOutcome,
   transcriptionRouteMessage,
   transcriptionConsentPending,
+  diarization,
+  diarizationError,
+  onRunDiarization,
+  onRenameDiarizationSpeaker,
   selectedMeeting,
   transcript,
   transcriptError,
@@ -1638,6 +1668,10 @@ function TranscriptPane({
   consentStatus: "unknown" | "granted";
   onGrantTranscriptionConsent?: () => Promise<void>;
   onRetryTranscription?: () => Promise<void>;
+  diarization?: DiarizationStatusWire | null;
+  diarizationError?: string | null;
+  onRunDiarization?: () => Promise<void>;
+  onRenameDiarizationSpeaker?(speakerId: string, name: string): Promise<void>;
   pending: boolean;
   providerStatus?: TranscriptionProviderStatusWire["status"];
   selectedRecording?: SelectedRecordingWire | null;
@@ -1686,6 +1720,14 @@ function TranscriptPane({
         {needsAccess ? <FocusPressable accessibilityLabel="Purchase or restore Premium" accessibilityRole="button" onPress={() => setPremiumOpen(true)} style={styles.ghostButton} testID="transcription-open-premium"><Text style={styles.ghostButtonText}>Purchase or restore Premium</Text></FocusPressable> : null}
         {premiumOpen ? <View testID="transcription-premium-panel">{transcriptionPremiumPanel}<Text style={styles.disclosureText}>When Premium is active, close this panel and choose Transcribe again.</Text><FocusPressable accessibilityLabel="Close Premium" accessibilityRole="button" onPress={() => setPremiumOpen(false)} style={styles.ghostButton}><Text style={styles.ghostButtonText}>Close Premium</Text></FocusPressable></View> : null}
         {transcriptionRouteOutcome === "interrupted" || transcriptionFailureCategory === "connection" || transcriptionFailureCategory === "publication" || transcriptError || (!selectedRecording && !transcriptLoading) || ((transcript?.status === "pending" || transcript?.status === "transcribing") && !active) ? <FocusPressable accessibilityLabel="Check transcription status" accessibilityRole="button" disabled={!interactive || transcriptLoading} onPress={() => void onCheckTranscriptionStatus?.()} style={styles.ghostButton} testID="transcription-check-status"><Text style={styles.ghostButtonText}>Check status</Text></FocusPressable> : null}
+        <DiarizationPanel
+          diarization={diarization}
+          error={diarizationError}
+          interactive={interactive}
+          onRenameSpeaker={onRenameDiarizationSpeaker}
+          onRun={onRunDiarization}
+          transcript={transcript}
+        />
         <TranscriptState
           interactive={interactive}
           onCitation={interactive ? onCitation : undefined}
@@ -1702,6 +1744,118 @@ function TranscriptPane({
         />
         </>}
       </ScrollView>
+    </View>
+  );
+}
+
+/**
+ * Speaker diarization controls (stage B4): run the pyannote attribution over
+ * the system capture timeline and rename the discovered speakers. Rendered
+ * only for a ready transcript with diarization status supplied by the app
+ * shell; the companion sees it too because eligibility is host-driven.
+ */
+function DiarizationPanel({
+  diarization,
+  error,
+  interactive,
+  onRenameSpeaker,
+  onRun,
+  transcript,
+}: {
+  diarization?: DiarizationStatusWire | null;
+  error?: string | null;
+  interactive: boolean;
+  onRenameSpeaker?: (speakerId: string, name: string) => Promise<void>;
+  onRun?: () => Promise<void>;
+  transcript: TranscriptWire | null;
+}) {
+  const [draftNames, setDraftNames] = useState<Record<string, string>>({});
+  const [renamePendingId, setRenamePendingId] = useState<string | null>(null);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  if (!diarization || transcript?.status !== "ready") return null;
+  if (!diarization.eligible && !diarization.applied) return null;
+
+  const running = diarization.running;
+  const runDisabled = !interactive || running || !diarization.available || !onRun;
+  const save = async (speakerId: string) => {
+    const name = (draftNames[speakerId] ?? "").trim();
+    if (!name || !onRenameSpeaker || renamePendingId) return;
+    setRenamePendingId(speakerId);
+    setRenameError(null);
+    try {
+      await onRenameSpeaker(speakerId, name);
+      setDraftNames((current) => ({ ...current, [speakerId]: "" }));
+    } catch {
+      setRenameError("Không lưu được tên người nói. Thử lại.");
+    } finally {
+      setRenamePendingId(null);
+    }
+  };
+
+  return (
+    <View style={styles.diarizationPanel} testID="diarization-panel">
+      {running ? (
+        <Text accessibilityLiveRegion="polite" style={styles.premiumProgress} testID="diarization-progress">
+          {`Đang nhận diện… ${Math.round(diarization.progress * 100)}%`}
+        </Text>
+      ) : (
+        <FocusPressable
+          accessibilityLabel="Nhận diện người nói"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: runDisabled }}
+          disabled={runDisabled}
+          onPress={onRun ? () => void onRun().catch(() => undefined) : undefined}
+          style={styles.secondaryButton}
+          testID="diarization-run"
+        >
+          <Text style={styles.secondaryButtonText}>{diarization.applied ? "Nhận diện lại" : "Nhận diện người nói"}</Text>
+        </FocusPressable>
+      )}
+      {!diarization.available && diarization.unavailableReason === "not_installed" ? (
+        <Text style={styles.diarizationHint} testID="diarization-hint-not-installed">
+          Chưa cài diarization — chạy: npm run diarization:install
+        </Text>
+      ) : null}
+      {!diarization.available && diarization.unavailableReason === "token_missing" ? (
+        <Text style={styles.diarizationHint} testID="diarization-hint-token">
+          Thiếu HF token — lưu token tại ~/.local/share/meetless/tools/pyannote/hf-token
+        </Text>
+      ) : null}
+      {error ? (
+        <Text accessibilityRole="alert" style={styles.error} testID="diarization-error">
+          {error}
+        </Text>
+      ) : null}
+      {renameError ? <Text accessibilityRole="alert" style={styles.error} testID="diarization-rename-error">{renameError}</Text> : null}
+      {diarization.applied && !running ? (
+        <View testID="diarization-speakers">
+          {diarization.speakers.map((speaker) => (
+            <View key={speaker.id} style={styles.diarizationRow}>
+              <Text style={styles.diarizationRowLabel} testID={`diarization-label-${speaker.id}`}>{`${speaker.name} →`}</Text>
+              <FocusTextInput
+                accessibilityLabel={`Đổi tên ${speaker.name}`}
+                onChangeText={(value) => setDraftNames((current) => ({ ...current, [speaker.id]: value }))}
+                placeholder={speaker.name}
+                placeholderTextColor={colors.muted}
+                style={styles.diarizationInput}
+                testID={`diarization-name-${speaker.id}`}
+                value={draftNames[speaker.id] ?? ""}
+              />
+              <FocusPressable
+                accessibilityLabel={`Lưu tên ${speaker.name}`}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: renamePendingId !== null }}
+                disabled={renamePendingId !== null}
+                onPress={() => void save(speaker.id)}
+                style={styles.ghostButton}
+                testID={`diarization-rename-${speaker.id}`}
+              >
+                <Text style={styles.ghostButtonText}>{renamePendingId === speaker.id ? "Đang lưu…" : "Lưu"}</Text>
+              </FocusPressable>
+            </View>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -2803,6 +2957,11 @@ const styles = StyleSheet.create({
   segmentButton: { width: 74, flexShrink: 0, paddingVertical: 2 },
   segmentRange: { color: colors.muted, fontFamily: mono, fontSize: 11.5 },
   speakerChip: { alignSelf: "flex-start", marginTop: 2, flexShrink: 0, flexDirection: "row", alignItems: "center", borderColor: colors.borderSoft, borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  diarizationPanel: { gap: 8, marginTop: 4 },
+  diarizationHint: { color: colors.muted, fontFamily: mono, fontSize: 11.5, lineHeight: 16 },
+  diarizationRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  diarizationRowLabel: { color: colors.secondary, fontSize: 12, flexShrink: 0 },
+  diarizationInput: { flex: 1, minHeight: 32, paddingHorizontal: 10, borderColor: colors.border, borderWidth: 1, borderRadius: 6, backgroundColor: "rgba(255,255,255,0.035)", color: colors.foreground, fontSize: 13 },
   speakerChipMicrophone: { backgroundColor: "rgba(94,106,210,0.14)", borderColor: "rgba(94,106,210,0.45)" },
   speakerChipSystem: { backgroundColor: "rgba(255,255,255,0.04)" },
   speakerChipText: { fontFamily: mono, fontSize: 10.5, letterSpacing: 0.2 },

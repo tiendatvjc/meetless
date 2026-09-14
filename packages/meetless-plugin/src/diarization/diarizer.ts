@@ -217,7 +217,10 @@ export async function runDiarizationSidecar(options: RunDiarizationSidecarOption
         resolve({ code, signal, stderr });
       });
     });
-    if (exit.code === 0) return parseTurnsFile(outPath);
+    // `await`, not a bare return: the finally-cleanup below runs before the
+    // outer promise adopts this one, and a rejection during that window would
+    // surface as an unhandled rejection before reaching the caller's catch.
+    if (exit.code === 0) return await parseTurnsFile(outPath);
     if (exit.code === 2 || exit.stderr.includes("DIARIZE_TOKEN_MISSING")) {
       throw new DiarizerTokenMissingError("Diarization HF token is missing; run npm run diarization:install");
     }

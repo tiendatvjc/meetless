@@ -13,6 +13,9 @@ import {
   MeetingCreateRpc,
   MeetingDeleteRpc,
   MeetingCitationResolveRpc,
+  MeetingDiarizationRenameRpc,
+  MeetingDiarizationRunRpc,
+  MeetingDiarizationStatusRpc,
   MeetingListRpc,
   MeetingPremiumOperationRpc,
   MeetingPremiumPurchaseRpc,
@@ -34,6 +37,8 @@ import {
   type PremiumAccessWire,
   type PremiumMutationResultWire,
   type ManagedDeviceWire,
+  type DiarizationStatusWire,
+  type DiarizationSpeakerWire,
   type TranscriptionRouteOutcomeWire,
   type SelectedRecordingWire,
   type TranscriptionStatusWire,
@@ -341,6 +346,37 @@ export class MeetlessClient {
       (method, payload) => this.daemon.invokePluginRpc(MEETLESS_PLUGIN_ID, method, payload),
       input,
     );
+  }
+
+  async getMeetingDiarizationStatus(meetingId: string): Promise<DiarizationStatusWire> {
+    this.requireReady();
+    return callPluginRpc(
+      MeetingDiarizationStatusRpc,
+      (method, payload) => this.daemon.invokePluginRpc(MEETLESS_PLUGIN_ID, method, payload),
+      { meetingId },
+    );
+  }
+
+  async runMeetingDiarization(meetingId: string): Promise<{ status: DiarizationStatusWire; transcript: TranscriptWire | null }> {
+    this.requireReady();
+    return callPluginRpc(
+      MeetingDiarizationRunRpc,
+      (method, payload) => this.daemon.invokePluginRpc(MEETLESS_PLUGIN_ID, method, payload),
+      { meetingId },
+    );
+  }
+
+  async renameMeetingDiarizationSpeakers(
+    meetingId: string,
+    names: Record<string, string>,
+  ): Promise<{ status: DiarizationStatusWire; transcript: TranscriptWire | null; speakers: DiarizationSpeakerWire[] }> {
+    this.requireReady();
+    const output = await callPluginRpc(
+      MeetingDiarizationRenameRpc,
+      (method, payload) => this.daemon.invokePluginRpc(MEETLESS_PLUGIN_ID, method, payload),
+      { meetingId, names },
+    );
+    return { status: output.status, transcript: output.transcript, speakers: output.status.speakers };
   }
 
   async getPremiumAccess(): Promise<PremiumAccessWire> {

@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { PluginContext } from "@paseo/plugin";
-import { MeetingTranscriptionConsentRpc } from "@meetless/meeting-contracts";
+import { MeetingDiarizationRenameRpc, MeetingDiarizationRunRpc, MeetingDiarizationStatusRpc, MeetingTranscriptionConsentRpc } from "@meetless/meeting-contracts";
 import { MeetingStore } from "@meetless/meeting-store";
 import contribute, { createTestContribution, type MeetlessContributionOptions } from "../index.js";
 import { ManagedTimelineArtifactStore } from "../src/managed-transcription.js";
@@ -32,6 +32,9 @@ describe("Meetless plugin contribution", () => {
       "meeting.delete",
       "meeting.transcript",
       "meeting.transcription.consent",
+      "meeting.diarization.status",
+      "meeting.diarization.run",
+      "meeting.diarization.rename",
       "meeting.citation.resolve",
       "meeting.premium.operation",
       "meeting.premium.status",
@@ -87,6 +90,75 @@ describe("Meetless plugin contribution", () => {
       message: null,
     });
     expect(loadServer).toHaveBeenCalledTimes(1);
+    await expect(cleanup()).resolves.toBeUndefined();
+  });
+
+  test("diarization RPCs reach the injected server seam and validate against the wire contracts", async () => {
+    const diarizationStatus = {
+      meetingId: "m-diarize",
+      available: true,
+      unavailableReason: null,
+      eligible: true,
+      applied: false,
+      running: false,
+      progress: 0,
+      speakers: [],
+    };
+    const appliedStatus = { ...diarizationStatus, applied: true, speakers: [{ id: "S1", name: "Người 1" }] };
+    const transcriptState = {
+      id: "transcript-r-diarize",
+      meetingId: "m-diarize",
+      recordingId: "r-diarize",
+      status: "ready",
+      plannerVersion: "m3-range-v1",
+      rangeMs: 30_000,
+      maxAttempts: 3,
+      audio: { destination: "meetings/r-diarize.mp3", byteLength: 128, sha256: "audio-sha", durationMs: 2_000 },
+      ranges: [{ ordinal: 0, startMs: 0, endMs: 2_000, segmentId: "segment-di-0" }],
+      checkpoints: [{
+        range: { ordinal: 0, startMs: 0, endMs: 2_000, segmentId: "segment-di-0" },
+        text: "hello",
+        attempts: 1,
+        completedAt: "2026-09-14T10:00:00.000Z",
+        usage: null,
+        detectedLanguages: ["vi"],
+        speakerLabel: "Cuộc họp",
+      }],
+      attemptsByOrdinal: { 0: 1 },
+      requestCount: 1,
+      usage: null,
+      detectedLanguages: ["vi"],
+      startedAt: "2026-09-14T10:00:00.000Z",
+      updatedAt: "2026-09-14T10:00:01.000Z",
+      failureReason: null,
+      publication: null,
+    };
+    const loadServer = vi.fn(async () => ({
+      meetingDiarizationStatus: async () => diarizationStatus,
+      runMeetingDiarization: async () => ({ status: appliedStatus, transcript: transcriptState }),
+      renameMeetingDiarizationSpeakers: async () => ({
+        status: { ...appliedStatus, speakers: [{ id: "S1", name: "Renamed Speaker" }] },
+        transcript: transcriptState,
+      }),
+      transcriptSpeakerLabelOverlay: async () => new Map([["segment-di-0", "Người 1"]]),
+    })) as unknown as NonNullable<MeetlessContributionOptions["loadServer"]>;
+    const handle = vi.fn();
+    const cleanup = createTestContribution({ loadServer })({ handle } as unknown as PluginContext);
+    const handler = (name: string) => handle.mock.calls.find(([rpc]) => rpc.name === name)![1] as
+      (input: unknown) => Promise<unknown>;
+
+    expect(MeetingDiarizationStatusRpc.output.parse(await handler("meeting.diarization.status")({ meetingId: "m-diarize" })))
+      .toMatchObject({ meetingId: "m-diarize", available: true, eligible: true });
+
+    const run = MeetingDiarizationRunRpc.output.parse(await handler("meeting.diarization.run")({ meetingId: "m-diarize" }));
+    expect(run.status.applied).toBe(true);
+    // The stored overlay replaces the stage-A system label on the wire.
+    expect(run.transcript?.segments[0]?.speakerLabel).toBe("Người 1");
+
+    const renamed = MeetingDiarizationRenameRpc.output.parse(await handler("meeting.diarization.rename")({
+      meetingId: "m-diarize", names: { S1: "Renamed Speaker" },
+    }));
+    expect(renamed.status.speakers).toEqual([{ id: "S1", name: "Renamed Speaker" }]);
     await expect(cleanup()).resolves.toBeUndefined();
   });
 
