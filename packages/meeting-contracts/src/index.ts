@@ -65,9 +65,13 @@ export const TranscriptUsageWireSchema = z.object({
 export const TranscriptSegmentWireSchema = z.object({
   range: TranscriptRangeWireSchema,
   text: z.string(),
+  /** Optional speaker attribution; absent on legacy transcripts and never required. */
+  speakerLabel: z.string().trim().max(80).optional(),
   completedAt: z.string().datetime(),
   detectedLanguages: z.array(z.string().trim().min(1)),
 }).strict();
+
+export type TranscriptSegmentWire = z.infer<typeof TranscriptSegmentWireSchema>;
 
 export const TranscriptWireSchema = z.object({
   id: z.string().trim().min(1),
