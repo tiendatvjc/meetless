@@ -26,6 +26,8 @@ Categories=Utility;AudioVideo;
 StartupWMClass=Meetless
 EOF
   update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+  # GNOME đánh dấu .desktop mới/ghi đè là "không tin cậy" — click im lặng không chạy.
+  gio set "$HOME/.local/share/applications/meetless.desktop" metadata::trusted true 2>/dev/null || true
   echo "Đã tạo shortcut: ~/.local/share/applications/meetless.desktop (mở menu → gõ Meetless)"
 }
 
