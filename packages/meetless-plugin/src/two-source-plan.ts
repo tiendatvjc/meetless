@@ -115,13 +115,6 @@ export function resolveTwoSourcePlan(input: {
   if (!input.microphone || !input.system) return null;
   // Preserved timelines (post chunk-cleanup) carry no per-chunk offsets;
   // treat the entire WAV as a single window per source.
-  if (input.microphone.chunkOffsets.length === 0 && input.microphone.durationMs > 0) {
-    return buildTwoSourceTranscriptPlan({
-      ...input,
-      microphone: { ...input.microphone, chunkOffsets: [{ chunkId: "preserved-microphone", logicalStartMs: 0, timelineStartMs: 0, durationMs: input.microphone.durationMs }] },
-      system: { ...input.system, chunkOffsets: [{ chunkId: "preserved-system", logicalStartMs: 0, timelineStartMs: 0, durationMs: input.system.durationMs }] },
-    });
-  }
   if (input.microphone.chunkOffsets.length === 0) return null;
   if (input.system.chunkOffsets.length === 0) return null;
   const plan = buildTwoSourceTranscriptPlan({
@@ -146,6 +139,11 @@ function sameRangePlan(left: readonly TranscriptRange[], right: readonly Transcr
  * so logical silence gaps between chunks stay inside one mapped range.
  */
 function planSourceWindows(timeline: SourceTimeline, rangeMs: number): PlannedSourceWindow[] {
+  // Preserved timelines (post chunk-cleanup) carry no per-chunk offsets;
+  // treat the entire WAV as a single continuous window starting at 0ms.
+  const offsets = timeline.chunkOffsets.length > 0 ? [...timeline.chunkOffsets] : [
+    { chunkId: "preserved-" + timeline.source, logicalStartMs: 0, timelineStartMs: 0, durationMs: timeline.durationMs },
+  ];
   const windows: PlannedSourceWindow[] = [];
   for (let startMs = 0; startMs < timeline.durationMs; startMs += rangeMs) {
     const endMs = Math.min(timeline.durationMs, startMs + rangeMs);
@@ -154,8 +152,8 @@ function planSourceWindows(timeline: SourceTimeline, rangeMs: number): PlannedSo
       speakerLabel: SPEAKER_LABELS[timeline.source],
       timelineStartMs: startMs,
       timelineEndMs: endMs,
-      logicalStartMs: timelineStartToLogicalMs(timeline.chunkOffsets, startMs),
-      logicalEndMs: timelineEndToLogicalMs(timeline.chunkOffsets, endMs),
+      logicalStartMs: timelineStartToLogicalMs(offsets, startMs),
+      logicalEndMs: timelineEndToLogicalMs(offsets, endMs),
     });
   }
   return windows;
