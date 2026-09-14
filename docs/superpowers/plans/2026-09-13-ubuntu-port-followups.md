@@ -60,3 +60,25 @@ Branch `linux-port` (fork tiendatvjc/meetless), completed 2026-09-13. Spec: ../s
 - Sáng 14-09 (tt): Transcribe hiện "could not connect" dù BYOK key hợp lệ — transcript failed cũ (tạo lúc chưa có key) khiến route đi recoverExisting → native socket trước khi BYOK probe chạy; kèm retry_exhausted gate bẫy thêm. Fix: BYOK probe đặt TRƯỚC recovery + exhausted gate (skip cả hai khi key configured). Provider BYOK đã chứng minh gọi thật OpenAI tiếng Việt thành công (probe 5s: "Để không công phụ không phụ thuộc vào nước mắm").
 
 - Transcribe retry_exhausted cuối cùng: bộ đếm attempts (19) nằm ở LỚP SERVICE trên transcript failed cũ — 2 cổng route đã vá chưa đủ; BYOK takeover cần reset attempts (hiện xử lý bằng data surgery cho bản f695c4b1, backup meetings.json.backup-*). TODO code: TranscriptionService hoặc byok dispatch tự reset transcript cũ khi byok tiếp quản.
+
+## Speaker diarization — residuals sau phase B (2026-09-14)
+
+Theo dõi chi tiết: `.superpowers/sdd/2026-09-14-speaker-diarization/progress.md`.
+Proof fixture toàn luồng đã chạy xanh: `npm run proof:diarization` (fixture
+2 nguồn → ffmpeg concat thật → attribution → overlay → rename → publication
+byte-identical; không cần model/HF token).
+
+- [ ] **Real-model smoke còn chờ user**: chạy `npm run diarization:install` +
+  HF token (2 model gated) → họp thật ≥2 người nói → bấm nút → kiểm nhãn
+  "Người 1/2" đúng người. (B5 gate tùy chọn theo plan.)
+- [ ] sidecar hf-token: file có BOM/CRLF sẽ bị từ chối — nên strip BOM +
+  whitespace trước khi set HF_TOKEN (B1 residual).
+- [ ] `--chunk-minutes <= 0` chưa được validate ở diarize.py (B1 residual).
+- [ ] Installer in thiếu usage-line (disk/network) như bản nháp đầu (B1 residual
+  cosmetic).
+- [ ] SIGKILL escalation sau timeout 30' của provider chưa có test (B3 residual).
+- [ ] `status.running` là transient ngắn trước khi eligibility check ném — UI có
+  thể thấy nhấp nháy "đang chạy" (B4 residual, cosmetic).
+- [ ] A-phase residuals (A3/A4): concat-before-mismatch-check perf, duplicate
+  sameRangePlan + double plan build, surface literal "Bạn" vs shared constant,
+  custom ranges unbounded (lý thuyết).

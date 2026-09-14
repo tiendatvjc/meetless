@@ -63,6 +63,7 @@
     "check:distribution-readiness": "node scripts/check-macos-distribution-readiness.mjs",
     "proof:m1": "node scripts/prove-m1.mjs",
     "proof:m2": "npm run build:native && npm run build:meetless && node scripts/prove-m2.mjs",
+    "proof:diarization": "npm run build:meetless && node scripts/prove-diarization.mjs",
     "proof:m2:scale": "npm run build:meetless && node scripts/prove-scalable-inventory.mjs",
     "proof:chat-popup-overlay": "node scripts/prove-chat-popup-overlay.mjs",
     "proof:m3:park-default": "node scripts/m3-live-proof.mjs park-default",
