@@ -139,6 +139,37 @@ describe("transcription route precedence", () => {
     expect(byokTranscribe).toHaveBeenCalledWith(expect.objectContaining({ recordingId: "r-byok" }));
   });
 
+  test("a configured BYOK key wins over a failed managed transcript and its native recovery", async () => {
+    // Regression: a transcript that failed through the managed path (for
+    // example before the key file existed) used to trap every retry in
+    // managed.resumeExisting (native socket) before the BYOK probe ran.
+    const recording = savedRecording("m-trapped", "r-trapped");
+    const failedManaged = transcript("m-trapped", "r-trapped", "failed");
+    const resumeExisting = vi.fn(async () => failedManaged as TranscriptState);
+    const managedTranscribe = vi.fn();
+    const pending = transcript("m-trapped", "r-trapped", "pending");
+    const byokTranscribe = vi.fn(async ({ onDurableStart }: {
+      recordingId: string;
+      onDurableStart(transcript: TranscriptState): void;
+    }) => {
+      onDurableStart(pending);
+      return { transcript: { ...pending, status: "ready" as const } };
+    });
+    const route = new TranscriptionRouteCoordinator(
+      routeStore([recording], () => failedManaged),
+      { status: async () => ({ status: "active" as const }) },
+      { transcribe: managedTranscribe, resumeExisting },
+      { status: async () => "configured", transcribe: byokTranscribe },
+    );
+
+    const result = await route.start("m-trapped");
+
+    expect(result).toMatchObject({ route: "byok", outcome: "started" });
+    expect(resumeExisting).not.toHaveBeenCalled();
+    expect(managedTranscribe).not.toHaveBeenCalled();
+    expect(byokTranscribe).toHaveBeenCalledOnce();
+  });
+
   test("a missing BYOK key keeps the managed route and its Premium gate unchanged", async () => {
     const recording = savedRecording("m-managed", "r-managed");
     const premiumStatus = vi.fn(async () => ({ status: "active" as const }));

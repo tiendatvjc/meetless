@@ -116,7 +116,12 @@ export class TranscriptionRouteCoordinator {
     let route: "managed" | "byok" = "managed";
     const result = (state: TranscriptionStatusWire, transcript: TranscriptState | null): TranscriptionRouteResult => ({ consent, route, ...state, transcript });
     let transcript = await this.store.getTranscriptForMeeting(meetingId);
-    if (transcript && this.managed.resumeExisting && !this.running.has(recording.id)) {
+    // linux-port/BYOK: a configured user key must win BEFORE any managed/native
+    // recovery or retry-exhaustion gate — a transcript that failed through the
+    // managed path (for example before the key file existed) would otherwise
+    // trap every retry in the native route.
+    const byok = this.byok !== undefined && (await this.byok.status()) === "configured" ? this.byok : null;
+    if (!byok && transcript && this.managed.resumeExisting && !this.running.has(recording.id)) {
       try { transcript = await this.recoverExisting(recording.id) ?? transcript; }
       catch (error) {
         transcript = await this.store.getTranscriptForMeeting(meetingId) ?? transcript;
@@ -127,11 +132,8 @@ export class TranscriptionRouteCoordinator {
     }
     if (transcript?.status === "ready") return result(this.state("completed"), transcript);
     if (this.running.has(recording.id)) return result(this.state("already_running"), transcript);
-    if (transcript?.status === "failed" && !canRetryTranscript(transcript)) return result(this.state("failed", false, "retry_exhausted", "No further transcription retries are available for this recording. The saved audio remains local."), transcript);
-    // BYOK selection (docs/product/monetization.md): a configured user key
-    // routes transcription locally before any Premium read and never touches
-    // Premium state; a missing BYOK key keeps the managed flow unchanged.
-    const byok = this.byok !== undefined && (await this.byok.status()) === "configured" ? this.byok : null;
+    if (!byok && transcript?.status === "failed" && !canRetryTranscript(transcript)) return result(this.state("failed", false, "retry_exhausted", "No further transcription retries are available for this recording. The saved audio remains local."), transcript);
+    // BYOK selection moved above the managed recovery gate; see the comment there.
     route = byok ? "byok" : "managed";
     if (!byok) {
       let access: PremiumAccessWire["status"] = "unavailable";
