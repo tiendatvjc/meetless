@@ -287,6 +287,9 @@ export class MeetingChatService {
         });
       }
     } catch (error) {
+      // Temporary linux-port diagnostics: the operational-failure copy hides
+      // the provider error; keep the raw cause in the daemon log.
+      console.error("[meetless-chat] ask failed:", error);
       const current = await this.store.getChatThread(meetingId).catch(() => null);
       if (current?.status === "running" && current.activeAttemptId === attemptId) {
         await this.store.failChatTurn(
@@ -310,6 +313,9 @@ export class PaseoMeetingChatAgentPort implements MeetingChatAgentPort {
   ) {}
 
   async getControls(lastSelection: ChatSelection | null): Promise<ChatControlsWire> {
+    // linux-port: the neutral chat execution root is runtime state; provider
+    // probes stat it as a cwd and fail with ENOENT when nothing created it.
+    await mkdir(this.executionRoot, { recursive: true }).catch(() => undefined);
     let catalog: ChatControlsCatalogWire;
     let catalogError: ChatCapabilityErrorWire | null = null;
     try {
