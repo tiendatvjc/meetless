@@ -664,7 +664,10 @@ export class PaseoMeetingChatAgentPort implements MeetingChatAgentPort {
         prompt: buildPrompt(input.messages),
       });
       this.agents.add(agent);
-      const result = await agent.waitForFinish(180_000);
+      // linux-port: slow local providers (opencode → GLM first turn) exceed a
+      // flat 3 minutes; operators can raise the ceiling via runtime env.
+      const finishTimeoutMs = Number(process.env.MEETLESS_CHAT_TIMEOUT_MS);
+      const result = await agent.waitForFinish(Number.isSafeInteger(finishTimeoutMs) && finishTimeoutMs > 0 ? finishTimeoutMs : 180_000);
       if (result.status !== "idle" || !result.lastMessage) {
         throw new Error(result.error ?? `Meeting chat provider ended with ${result.status}`);
       }

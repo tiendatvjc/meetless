@@ -8,6 +8,8 @@ LOG=/tmp/meetless-desktop.log
 export MEETLESS_RUNTIME_ROOT="${MEETLESS_RUNTIME_ROOT:-$HOME/.local/share/meetless}"
 export MEETLESS_LISTEN="${MEETLESS_LISTEN:-127.0.0.1:8081}"
 export MEETLESS_DEV_STATIC_RENDERER=1
+# GLM/Gemini qua opencode cần thời gian dài hơn 3 phút mặc định của chat.
+export MEETLESS_CHAT_TIMEOUT_MS="${MEETLESS_CHAT_TIMEOUT_MS:-600000}"
 
 # Desktop menu chạy với PATH hệ thống — tự dò Node của nvm nếu thiếu.
 if ! command -v npm >/dev/null 2>&1; then
