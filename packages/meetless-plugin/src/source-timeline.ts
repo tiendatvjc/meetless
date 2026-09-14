@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { parseCanonicalPcmWav } from "@meetless/managed-transcription-foundation";
@@ -69,6 +69,34 @@ export async function buildSourceTimelines(
   recordingId: string,
   options?: SourceTimelineOptions,
 ): Promise<SourceTimelines> {
+  // speaker/linux-port: after chunk cleanup the preserved per-source WAVs are
+  // the durable artifact; reuse them (with empty offsets — plan builders treat
+  // a timeline with no chunk offsets as a single full-file window).
+  const preservedDir = path.join(sessionDirectory, "source-timelines");
+  try {
+    const preserved = await readdir(preservedDir);
+    if (preserved.includes("microphone.wav") && preserved.includes("system.wav")) {
+      const micStat = await stat(path.join(preservedDir, "microphone.wav"));
+      const sysStat = await stat(path.join(preservedDir, "system.wav"));
+      return {
+        microphone: {
+          source: "microphone",
+          wavPath: path.join(preservedDir, "microphone.wav"),
+          durationMs: Math.round((micStat.size - 44) / 32), // 16kHz mono s16le
+          chunkOffsets: [],
+        },
+        system: {
+          source: "system",
+          wavPath: path.join(preservedDir, "system.wav"),
+          durationMs: Math.round((sysStat.size - 44) / 32),
+          chunkOffsets: [],
+        },
+      };
+    }
+  } catch {
+    // fall through to chunk-based build
+  }
+
   const ffmpeg = (options?.ffmpeg ?? process.env.MEETLESS_FFMPEG)?.trim();
   if (!ffmpeg) {
     throw new Error("Source timeline concatenation requires the ffmpeg executable (options.ffmpeg or MEETLESS_FFMPEG)");
