@@ -832,7 +832,7 @@ function AppTopbar({
         <Text style={styles.brandText}>Meetless</Text>
       </View>
       <View style={[styles.hostChip, display.tone === "online" && styles.hostChipOnline, display.tone === "offline" && styles.hostChipOffline]}>
-        <View style={styles.hostDot} accessibilityElementsHidden />
+        <View style={[styles.hostDot, display.tone === "online" && styles.hostDotOnline, display.tone === "offline" && styles.hostDotOffline]} accessibilityElementsHidden />
         <Text
           accessibilityLiveRegion="polite"
           accessibilityLabel={display.label}
@@ -2699,8 +2699,10 @@ const styles = StyleSheet.create({
   brandText: { color: colors.foreground, fontFamily: sans, fontSize: 15, fontWeight: "600", letterSpacing: -0.15 },
   mark: { width: 18, height: 18, borderRadius: 5, backgroundColor: colors.accent },
   hostChip: { flexDirection: "row", alignItems: "center", gap: 8, borderColor: colors.borderSoft, borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5, maxWidth: "55%" },
-  hostChipOnline: { backgroundColor: "rgba(39,166,68,0.08)" },
-  hostChipOffline: { backgroundColor: "rgba(234,179,8,0.08)" },
+  hostChipOnline: { backgroundColor: "rgba(39,166,68,0.16)", borderColor: "rgba(39,166,68,0.45)" },
+  hostChipOffline: { backgroundColor: "rgba(234,179,8,0.16)", borderColor: "rgba(234,179,8,0.45)" },
+  hostDotOnline: { backgroundColor: colors.success },
+  hostDotOffline: { backgroundColor: "#eab308" },
   hostDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.meta },
   hostText: { color: colors.muted, fontFamily: mono, fontSize: 12, flexShrink: 1 },
   sidebarPane: { width: 272, flexShrink: 0, minHeight: 0 },

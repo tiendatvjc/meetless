@@ -91,4 +91,51 @@ describe("linux capture helper entry (fixture mode)", () => {
       expect(typed.durationMs).toBeGreaterThan(0);
     }
   }, 30_000);
+
+  it("commits non-overlapping frame intervals across multiple chunks per source", async () => {
+    // Regression: startFrame derived from wall-clock ms drifted by rounding and
+    // produced overlapping intervals that inventory reconciliation rejects.
+    // Drive the entry directly: the env knob must reach the helper process,
+    // which CaptureHelper's minimal dev environment would strip.
+    const { spawn } = await import("node:child_process");
+    const sessionDirectory2 = await mkdtemp(path.join(tmpdir(), "meetless-multi-"));
+    const childProcess = spawn(process.execPath, [entry, "--fixture"], {
+      env: { ...process.env, MEETLESS_CHUNK_PAYLOAD_BYTES: String(96_000), PATH: process.env.PATH ?? "" },
+      stdio: ["pipe", "pipe", "inherit"],
+    });
+    const emitted: string[] = [];
+    childProcess.stdout.setEncoding("utf8");
+    childProcess.stdout.on("data", (data: string) => {
+      for (const line of String(data).split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line) as { event?: string; id?: string };
+          if (event.event === "chunkCommitted" && event.id) emitted.push(event.id);
+        } catch { /* non-json */ }
+      }
+    });
+    childProcess.stdin.write(`${JSON.stringify({ version: 1, command: "start", sessionDirectory: sessionDirectory2, elapsedMs: 0 })}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 9_000)); // ≥2 commits per source
+    childProcess.stdin.write(`${JSON.stringify({ version: 1, command: "stop" })}\n`);
+    await new Promise((resolve) => childProcess.once("exit", resolve));
+    await rm(sessionDirectory2, { recursive: true, force: true });
+    expect(emitted.length).toBeGreaterThanOrEqual(4);
+    const perSource = new Map<string, Array<{ start: number; frames: number }>>();
+    for (const id of emitted) {
+      const match = /^chunk--(microphone|system)--\d{6}--(\d{12})--(\d{12})--16000--1$/u.exec(id);
+      expect(match).not.toBeNull();
+      const source = match![1]!;
+      const list = perSource.get(source) ?? [];
+      list.push({ start: Number(match![2]), frames: Number(match![3]) });
+      perSource.set(source, list);
+    }
+    for (const [source, list] of perSource) {
+      list.sort((a, b) => a.start - b.start);
+      for (let i = 1; i < list.length; i += 1) {
+        const previousChunk = list[i - 1]!;
+        expect(previousChunk.start + previousChunk.frames).toBeLessThanOrEqual(list[i]!.start);
+        void source;
+      }
+    }
+  }, 30_000);
 });

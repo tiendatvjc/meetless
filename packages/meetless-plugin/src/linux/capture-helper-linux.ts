@@ -79,6 +79,8 @@ interface SourceBinding {
   loop: Promise<void> | null;
   /** Storage-contract chunk sequence for this source. */
   sequence: number;
+  /** Cumulative committed frames; the next chunk starts exactly here. */
+  committedFrames?: number;
   /** Carries a trailing odd byte so committed payloads stay sample-aligned. */
   carry: Buffer;
 }
@@ -97,7 +99,14 @@ async function toStorageContractChunk(
   event: LinuxChunkEvent,
 ): Promise<LinuxChunkEvent> {
   const frames = Math.floor((event.byteLength - LINUX_WAV_HEADER_BYTES) / 2);
-  const startFrame = Math.round((event.logicalStartMs * event.sampleRate) / 1_000);
+  // Frame cursor: chunk N starts exactly where chunk N-1 ended. Deriving
+  // startFrame from wall-clock logicalStartMs accumulates rounding drift and
+  // produced overlapping intervals that inventory reconciliation rejects.
+  if (binding.committedFrames === undefined) {
+    binding.committedFrames = Math.max(0, Math.round((event.logicalStartMs * event.sampleRate) / 1_000));
+  }
+  const startFrame = binding.committedFrames;
+  binding.committedFrames = startFrame + frames;
   binding.sequence += 1;
   const id = [
     "chunk", kind, String(binding.sequence).padStart(6, "0"), String(startFrame).padStart(12, "0"),
@@ -129,6 +138,8 @@ export async function runLinuxCaptureHelper(options: {
   env?: NodeJS.ProcessEnv;
   spawnSource?: (kind: "microphone" | "system", device: string) => ChildProcessLike;
   nowMs?: () => number;
+  /** Dev/test knob: commit smaller chunks so multi-commit paths are exercisable. */
+  chunkPayloadBytes?: number;
 }): Promise<number> {
   const fixture = options.args.includes("--fixture") || options.env?.MEETLESS_CAPTURE_MODE === "fixture";
   const nowMs = options.nowMs ?? (() => performance.now());
@@ -145,7 +156,7 @@ export async function runLinuxCaptureHelper(options: {
   const startSource = async (kind: "microphone" | "system", sessionDirectory: string): Promise<void> => {
     const binding = sources.get(kind)!;
     if (binding.child) return;
-    binding.writer = new WavChunkWriter({ sessionDirectory, recordingId, source: kind });
+    binding.writer = new WavChunkWriter({ sessionDirectory, recordingId, source: kind, chunkPayloadBytes: options.chunkPayloadBytes });
     binding.sequence = 0;
     binding.carry = Buffer.alloc(0);
     const device = fixture ? "fixture" : await resolveParecDevice(kind);
