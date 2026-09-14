@@ -83,6 +83,26 @@ Commit. Smoke thật (tùy chọn, cần user): họp thật ≥2 người nói 
 - Giai đoạn A: ~1 ngày làm việc (4 task nhỏ).
 - Giai đoạn B: ~2-3 ngày (installer + sidecar + UI), phần chờ lâu nhất là tải model (~600MB, 1 lần).
 
+---
+
+### Giai đoạn C — Provider adapters riêng cho GLM / Gemini (kế hoạch, chờ duyệt cùng A/B)
+
+> Chủ sở hữu yêu cầu 2026-09-14: đường tắt qua OpenCode đã có sẵn (không cần
+> code — GLM 5.x hiện dưới nhóm "OpenCode" trong picker). Giai đoạn này làm
+> adapter ĐỘC LẪN để GLM/Gemini hiện như provider cấp một (không qua OpenCode).
+
+- **C1 — Khung DevProvider (generic OpenAI-compatible):** cấu hình provider
+  tùy chọn qua file runtime (`~/.local/share/meetless/chat-providers.json`):
+  `{ name, baseUrl, apiKeyRef, models[] }`; chat-service nạp vào catalog cạnh
+  codex/claude/opencode; key đọc 0600 như BYOK. Ước tính ½ ngày.
+- **C2 — Preset GLM (Z.ai):** endpoint tương thích OpenAI của Z.ai + model
+  list glm-5.x; hướng dẫn lấy key trong app. Ước tính 2 giờ.
+- **C3 — Preset Gemini:** qua `@ai-sdk/google` trong OpenCode (cần
+  GEMINI_API_KEY của người dùng) HOẶC adapter C1 nếu Google exposing
+  OpenAI-compatible endpoint cho tài khoản của user. Ước tính 2 giờ.
+- Ràng buộc: mọi provider tùy chọn phải tôn trọng luồng trích dẫn segmentId
+  hiện có (chat-service đã enforce qua MCP tools).
+
 ## Điểm dừng chờ duyệt (theo yêu cầu chủ sở hữu)
 
 KHÔNG bắt đầu Task nào trước khi được duyệt. Sau duyệt, chạy theo A→B, giữa A và B cho phép dừng để dùng thử A.
